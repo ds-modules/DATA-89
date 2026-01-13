@@ -1127,3 +1127,4 @@ def show_gradient_field():
     viz = GradientFieldVisualization()
     viz.display()
     return viz
+
