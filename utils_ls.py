@@ -1104,3 +1104,4 @@ def show_least_squares():
     viz.display()
     return viz
 
+

@@ -1128,3 +1128,4 @@ def show_gradient_field():
     viz.display()
     return viz
 
+
