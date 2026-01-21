@@ -250,6 +250,7 @@ class DistributionProbabilityVisualization:
         self.samples = np.array([])
         self.plot_output = widgets.Output()
         self.show_pdf_flag = False  # Track whether PDF should be shown
+        self.show_shaded_region_flag = False  # Track whether shaded region should be shown
         self.bounds_interacted = False  # Track whether user has interacted with bounds
         
         # Distribution options
@@ -369,6 +370,13 @@ class DistributionProbabilityVisualization:
             disabled=True  # Disabled until samples are drawn
         )
         
+        # Show Shaded Region button (disabled initially)
+        self.show_shaded_region_button = widgets.Button(
+            description="Display Shaded Region",
+            button_style='primary',
+            disabled=True  # Disabled until samples are drawn
+        )
+        
         # Probability calculation dropdown
         self.prob_type_dropdown = widgets.Dropdown(
             options=["of outcome", "under upper bound", "above lower bound", "in interval"],
@@ -411,7 +419,7 @@ class DistributionProbabilityVisualization:
             widgets.HTML("<hr>"),
             self.prob_type_dropdown,
             self.slider_container,  # Dynamic slider container
-            self.show_pdf_button,  # Show PDF/PMF button directly under sliders
+            widgets.HBox([self.show_shaded_region_button, self.show_pdf_button]),  # Buttons side by side
             widgets.HTML("<hr>"),
             self.prob_label
         ])
@@ -429,6 +437,7 @@ class DistributionProbabilityVisualization:
         self.draw_button.on_click(self._on_draw_clicked)
         self.reset_button.on_click(self._on_reset_clicked)
         self.show_pdf_button.on_click(self._on_show_pdf_clicked)
+        self.show_shaded_region_button.on_click(self._on_show_shaded_region_clicked)
         
         # Update plot when sliders change (but only if samples exist)
         for widgets_list in self.param_widgets.values():
@@ -443,7 +452,7 @@ class DistributionProbabilityVisualization:
         """Handle bound slider changes - only update plot if samples exist"""
         self.bounds_interacted = True  # User has interacted with bounds
         if len(self.samples) > 0:
-            self._update_plot(show_pdf=self.show_pdf_flag)  # Use current PDF flag state
+            self._update_plot()
         
     def _on_param_change(self, change):
         """Handle parameter changes - only update plot if samples exist"""
@@ -451,7 +460,7 @@ class DistributionProbabilityVisualization:
         if self.dist_dropdown.value in ["Poisson", "Binomial"]:
             self._update_bound_sliders()
         if len(self.samples) > 0:
-            self._update_plot(show_pdf=self.show_pdf_flag)  # Use current PDF flag state
+            self._update_plot()
         
     def _on_category_change(self, change):
         """Handle category change"""
@@ -467,6 +476,9 @@ class DistributionProbabilityVisualization:
         self.show_pdf_flag = False
         self.show_pdf_button.disabled = True
         self.show_pdf_button.description = "Show PDF/PMF"
+        self.show_shaded_region_flag = False
+        self.show_shaded_region_button.disabled = True
+        self.show_shaded_region_button.description = "Display Shaded Region"
         # Reset bounds interaction flag - histogram will be all blue until user interacts
         self.bounds_interacted = False
         # Reset status
@@ -483,6 +495,9 @@ class DistributionProbabilityVisualization:
         self.show_pdf_flag = False
         self.show_pdf_button.disabled = True
         self.show_pdf_button.description = "Show PDF/PMF"
+        self.show_shaded_region_flag = False
+        self.show_shaded_region_button.disabled = True
+        self.show_shaded_region_button.description = "Display Shaded Region"
         # Reset bounds interaction flag - histogram will be all blue until user interacts
         self.bounds_interacted = False
         # Reset status
@@ -503,6 +518,11 @@ class DistributionProbabilityVisualization:
         self.show_pdf_flag = False
         self.show_pdf_button.disabled = True
         self.show_pdf_button.description = "Show PDF/PMF"
+        
+        # Reset shaded region flag and button
+        self.show_shaded_region_flag = False
+        self.show_shaded_region_button.disabled = True
+        self.show_shaded_region_button.description = "Display Shaded Region"
         
         # Reset bounds interaction flag
         self.bounds_interacted = False
@@ -527,7 +547,17 @@ class DistributionProbabilityVisualization:
                 self.show_pdf_button.description = "Hide PDF/PMF"
             else:
                 self.show_pdf_button.description = "Show PDF/PMF"
-            self._update_plot(show_pdf=self.show_pdf_flag)
+            self._update_plot()
+    
+    def _on_show_shaded_region_clicked(self, button):
+        """Handle Show Shaded Region button click"""
+        if len(self.samples) > 0:
+            self.show_shaded_region_flag = not self.show_shaded_region_flag
+            if self.show_shaded_region_flag:
+                self.show_shaded_region_button.description = "Hide Shaded Region"
+            else:
+                self.show_shaded_region_button.description = "Display Shaded Region"
+            self._update_plot()
         
     def _update_param_widgets(self):
         """Update parameter widgets based on current distribution"""
@@ -562,7 +592,7 @@ class DistributionProbabilityVisualization:
         """Handle probability type change"""
         self._update_slider_visibility()  # Update which sliders are shown
         if len(self.samples) > 0:
-            self._update_plot(show_pdf=self.show_pdf_flag)  # Use current PDF flag state
+            self._update_plot()
         
     def _on_draw_clicked(self, button):
         """Handle draw samples button with progressive animation"""
@@ -595,6 +625,10 @@ class DistributionProbabilityVisualization:
                 self.show_pdf_button.disabled = False
                 self.show_pdf_flag = False  # Reset to not showing PDF initially
                 self.show_pdf_button.description = "Show PDF/PMF"
+                # Enable the Show Shaded Region button
+                self.show_shaded_region_button.disabled = False
+                self.show_shaded_region_flag = False  # Reset to not showing shaded region initially
+                self.show_shaded_region_button.description = "Display Shaded Region"
                 # Update slider visibility based on current prob_type
                 self._update_slider_visibility()
                 # Show probability controls
@@ -605,7 +639,7 @@ class DistributionProbabilityVisualization:
             should_update_plot = (sample_index < 100) or (batch_count % 2 == 0)
             
             if should_update_plot:
-                self._update_plot(show_pdf=False)  # Only show histogram initially
+                self._update_plot()  # Uses instance flags (both PDF and shaded region off initially)
             
             # Always update status
             self.status_html.value = f"Generated {end_index} / {n_total} samples"
@@ -621,7 +655,7 @@ class DistributionProbabilityVisualization:
         # Final update with all samples
         self.samples = all_samples
         self._update_bound_sliders()  # Update sliders to match full sample range
-        self._update_plot(show_pdf=False)
+        self._update_plot()  # Uses instance flags (both PDF and shaded region off initially)
         self.status_html.value = f"Complete! Generated {n_total} samples."
     
     def _get_x_axis_range(self):
@@ -824,11 +858,15 @@ class DistributionProbabilityVisualization:
             # Reset probability label
             self.prob_label.value = '<div style="font-size: 18px; padding: 10px; background-color: #f0f0f0; border: 2px solid #333; border-radius: 5px;"><b>Estimated Probability:</b> <span style="color: #0066cc; font-size: 20px; font-weight: bold;">N/A</span><br><b>True Probability:</b> <span style="color: #cc6600; font-size: 20px; font-weight: bold;">N/A</span></div>'
     
-    def _update_plot(self, change=None, show_pdf=True):
+    def _update_plot(self, change=None):
         """Update the plot with histogram and overlaid PDF/PMF"""
         if len(self.samples) == 0:
             self._show_blank_plot()
             return
+        
+        # Use instance flags for display options
+        show_pdf = self.show_pdf_flag
+        show_shaded_region = self.show_shaded_region_flag
             
         with self.plot_output:
             clear_output(wait=True)
@@ -866,8 +904,8 @@ class DistributionProbabilityVisualization:
                     unique_vals, counts = np.unique(self.samples, return_counts=True)
                     counts = counts / len(self.samples)  # Normalize to probability
                     
-                    # Only show red highlighting when PDF/PMF is shown
-                    if show_pdf:
+                    # Only show red highlighting when shaded region is shown
+                    if show_shaded_region:
                         # Determine which values are in the selected region (inclusive bounds)
                         if prob_type == "of outcome":
                             selected_mask = unique_vals == int(np.round(bound1))
@@ -885,7 +923,7 @@ class DistributionProbabilityVisualization:
                         hist_line_colors = ['darkred' if sel else 'navy' for sel in selected_mask]
                         hist_line_widths = [2 if sel else 1 for sel in selected_mask]
                     else:
-                        # All blue when PDF/PMF is not shown
+                        # All blue when shaded region is not shown
                         hist_colors = 'rgba(70,130,180,0.6)'
                         hist_line_colors = 'navy'
                         hist_line_widths = 1
@@ -917,8 +955,8 @@ class DistributionProbabilityVisualization:
                         opacity=0.7
                     ))
                     
-                    # Only shade histogram for probability region when PDF is shown (inclusive bounds)
-                    if show_pdf:
+                    # Only shade histogram for probability region when shaded region is shown (inclusive bounds)
+                    if show_shaded_region:
                         if prob_type == "under upper bound":
                             mask = bin_centers <= bound2  # Inclusive upper bound
                             if np.any(mask):
@@ -958,41 +996,30 @@ class DistributionProbabilityVisualization:
             
             # Overlay PDF/PMF on top if show_pdf is True
             if show_pdf and pdf_pmf_values is not None:
-                # Determine which region to shade based on prob_type (inclusive bounds)
-                if prob_type == "of outcome":
-                    shade_x = [bound1, bound1]
-                    shade_y = [0, np.max(pdf_pmf_values) * 1.1]
-                elif prob_type == "under upper bound":
-                    mask = x_range <= bound2  # Inclusive upper bound
-                    shade_x = x_range[mask]
-                    shade_y = pdf_pmf_values[mask]
-                elif prob_type == "above lower bound":
-                    mask = x_range >= bound1  # Inclusive lower bound
-                    shade_x = x_range[mask]
-                    shade_y = pdf_pmf_values[mask]
-                elif prob_type == "in interval":
-                    mask = (x_range >= bound1) & (x_range <= bound2)  # Inclusive both bounds
-                    shade_x = x_range[mask]
-                    shade_y = pdf_pmf_values[mask]
-                
                 # Plot PDF/PMF overlay
                 if dist_category == "Discrete":
-                    # Determine which PMF values are in the selected region (inclusive bounds)
-                    if prob_type == "of outcome":
-                        pmf_selected_mask = x_range == int(np.round(bound1))
-                    elif prob_type == "under upper bound":
-                        pmf_selected_mask = x_range <= bound2  # Inclusive upper bound
-                    elif prob_type == "above lower bound":
-                        pmf_selected_mask = x_range >= bound1  # Inclusive lower bound
-                    elif prob_type == "in interval":
-                        pmf_selected_mask = (x_range >= bound1) & (x_range <= bound2)  # Inclusive both bounds
+                    # Determine which PMF values are in the selected region (inclusive bounds) - only if shaded region is shown
+                    if show_shaded_region:
+                        if prob_type == "of outcome":
+                            pmf_selected_mask = x_range == int(np.round(bound1))
+                        elif prob_type == "under upper bound":
+                            pmf_selected_mask = x_range <= bound2  # Inclusive upper bound
+                        elif prob_type == "above lower bound":
+                            pmf_selected_mask = x_range >= bound1  # Inclusive lower bound
+                        elif prob_type == "in interval":
+                            pmf_selected_mask = (x_range >= bound1) & (x_range <= bound2)  # Inclusive both bounds
+                        else:
+                            pmf_selected_mask = np.zeros(len(x_range), dtype=bool)
+                        
+                        # Create color array: red for selected, orange for not selected
+                        pmf_colors = ['rgba(255,0,0,0.8)' if sel else 'rgba(255,165,0,0.8)' for sel in pmf_selected_mask]
+                        pmf_line_colors = ['darkred' if sel else 'orange' for sel in pmf_selected_mask]
+                        pmf_line_widths = [3 if sel else 2 for sel in pmf_selected_mask]
                     else:
-                        pmf_selected_mask = np.zeros(len(x_range), dtype=bool)
-                    
-                    # Create color array: red for selected, orange for not selected
-                    pmf_colors = ['rgba(255,0,0,0.8)' if sel else 'rgba(255,165,0,0.8)' for sel in pmf_selected_mask]
-                    pmf_line_colors = ['darkred' if sel else 'orange' for sel in pmf_selected_mask]
-                    pmf_line_widths = [3 if sel else 2 for sel in pmf_selected_mask]
+                        # All orange when shaded region is not shown
+                        pmf_colors = 'rgba(255,165,0,0.8)'
+                        pmf_line_colors = 'orange'
+                        pmf_line_widths = 2
                     
                     # For discrete, plot as bars with color-coding (red for selected region, orange otherwise)
                     fig.add_trace(go.Bar(
@@ -1016,8 +1043,38 @@ class DistributionProbabilityVisualization:
                         line=dict(color='orange', width=3),
                         showlegend=True
                     ))
+            
+            # Add shaded area and vertical lines only if shaded region is shown
+            if show_shaded_region:
+                # Determine which region to shade based on prob_type (inclusive bounds)
+                if prob_type == "of outcome":
+                    shade_x = [bound1, bound1]
+                    if pdf_pmf_values is not None:
+                        shade_y = [0, np.max(pdf_pmf_values) * 1.1]
+                    else:
+                        shade_y = [0, 1]
+                elif prob_type == "under upper bound":
+                    mask = x_range <= bound2  # Inclusive upper bound
+                    shade_x = x_range[mask]
+                    if pdf_pmf_values is not None:
+                        shade_y = pdf_pmf_values[mask]
+                    else:
+                        shade_y = None
+                elif prob_type == "above lower bound":
+                    mask = x_range >= bound1  # Inclusive lower bound
+                    shade_x = x_range[mask]
+                    if pdf_pmf_values is not None:
+                        shade_y = pdf_pmf_values[mask]
+                    else:
+                        shade_y = None
+                elif prob_type == "in interval":
+                    mask = (x_range >= bound1) & (x_range <= bound2)  # Inclusive both bounds
+                    shade_x = x_range[mask]
+                    if pdf_pmf_values is not None:
+                        shade_y = pdf_pmf_values[mask]
+                    else:
+                        shade_y = None
                 
-                # Add shaded area and vertical lines for PDF/PMF probability region
                 # Calculate max y value for vertical lines (from both histogram and PDF/PMF)
                 max_hist = 0
                 if len(self.samples) > 0:
@@ -1029,7 +1086,7 @@ class DistributionProbabilityVisualization:
                         n_bins = 50
                         hist_counts, _ = np.histogram(self.samples, bins=n_bins, range=(x_min, x_max), density=True)
                         max_hist = np.max(hist_counts) if len(hist_counts) > 0 else 0
-                max_pdf = np.max(pdf_pmf_values) if len(pdf_pmf_values) > 0 else 0
+                max_pdf = np.max(pdf_pmf_values) if pdf_pmf_values is not None and len(pdf_pmf_values) > 0 else 0
                 max_y = max(max_hist, max_pdf, 0.1) * 1.1
                 
                 # Add vertical lines for bounds and shaded area for continuous PDF
@@ -1043,7 +1100,7 @@ class DistributionProbabilityVisualization:
                         line=dict(color='red', width=3, dash='dash'),
                         showlegend=False
                     ))
-                elif dist_category == "Continuous" and len(shade_x) > 0:
+                elif dist_category == "Continuous" and show_pdf and shade_y is not None and len(shade_x) > 0:
                     # For continuous PDF, add filled area under PDF curve
                     fig.add_trace(go.Scatter(
                         x=np.concatenate([[shade_x[0]], shade_x, [shade_x[-1]]]),
