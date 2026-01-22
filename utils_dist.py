@@ -379,8 +379,8 @@ class DistributionProbabilityVisualization:
         
         # Probability calculation dropdown
         self.prob_type_dropdown = widgets.Dropdown(
-            options=["of outcome", "under upper bound", "above lower bound", "in interval"],
-            value="in interval",
+            options=["", "of outcome", "under upper bound", "above lower bound", "in interval"],
+            value="",
             description="Find Probability:",
             style={'description_width': 'initial'}
         )
@@ -419,7 +419,7 @@ class DistributionProbabilityVisualization:
             widgets.HTML("<hr>"),
             self.prob_type_dropdown,
             self.slider_container,  # Dynamic slider container
-            widgets.HBox([self.show_shaded_region_button, self.show_pdf_button]),  # Buttons side by side
+            widgets.HBox([self.show_pdf_button]),  # Only PDF button (shaded region is automatic)
             widgets.HTML("<hr>"),
             self.prob_label
         ])
@@ -471,6 +471,8 @@ class DistributionProbabilityVisualization:
             self.dist_dropdown.options = self.discrete_dists
             self.dist_dropdown.value = "Bernoulli"
         self._update_param_widgets()
+        # Reset probability type dropdown to empty
+        self.prob_type_dropdown.value = ""
         # Clear samples and show blank plot
         self.samples = np.array([])
         self.show_pdf_flag = False
@@ -490,6 +492,8 @@ class DistributionProbabilityVisualization:
     def _on_dist_change(self, change):
         """Handle distribution change"""
         self._update_param_widgets()
+        # Reset probability type dropdown to empty
+        self.prob_type_dropdown.value = ""
         # Clear samples and show blank plot
         self.samples = np.array([])
         self.show_pdf_flag = False
@@ -570,7 +574,10 @@ class DistributionProbabilityVisualization:
         """Update which sliders are visible based on probability type"""
         prob_type = self.prob_type_dropdown.value
         
-        if prob_type == "of outcome":
+        if prob_type == "":
+            # Empty selection - hide sliders
+            self.slider_container.children = ()
+        elif prob_type == "of outcome":
             # Only show bound1 (the outcome value)
             self.slider_container.children = (self.bound1_slider,)
             self.bound1_slider.description = "Outcome:"
@@ -591,6 +598,24 @@ class DistributionProbabilityVisualization:
     def _on_prob_type_change(self, change):
         """Handle probability type change"""
         self._update_slider_visibility()  # Update which sliders are shown
+        # If empty, set bounds off-screen and hide shaded region
+        if self.prob_type_dropdown.value == "":
+            # Set bounds to very negative and very positive values to keep them off-screen
+            self.bound1_slider.value = -1e10
+            self.bound2_slider.value = 1e10
+            # Hide shaded region when no prob_type is selected
+            self.show_shaded_region_flag = False
+        else:
+            # When changing to a non-empty type, automatically show shaded region
+            self.show_shaded_region_flag = True
+            # When changing to a non-empty type, reset bounds to default range
+            # Check if previous value was empty (changing from empty to non-empty)
+            if change.get('old') == "":
+                # Reset bounds_interacted so bounds get set to default range
+                self.bounds_interacted = False
+            # Update bound sliders to set proper ranges and default values
+            # This will set bounds to full range (x_min to x_max) for the distribution
+            self._update_bound_sliders(reset_to_full_range=True)
         if len(self.samples) > 0:
             self._update_plot()
         
@@ -620,15 +645,21 @@ class DistributionProbabilityVisualization:
             
             # Update bound sliders on first batch
             if sample_index == 0:
-                self._update_bound_sliders()
+                # If prob_type is not empty, reset bounds to full range for the distribution
+                if self.prob_type_dropdown.value != "":
+                    self.bounds_interacted = False
+                    self._update_bound_sliders(reset_to_full_range=True)
+                else:
+                    self._update_bound_sliders()
                 # Enable the Show PDF/PMF button
                 self.show_pdf_button.disabled = False
                 self.show_pdf_flag = False  # Reset to not showing PDF initially
                 self.show_pdf_button.description = "Show PDF/PMF"
-                # Enable the Show Shaded Region button
-                self.show_shaded_region_button.disabled = False
-                self.show_shaded_region_flag = False  # Reset to not showing shaded region initially
-                self.show_shaded_region_button.description = "Display Shaded Region"
+                # Automatically show shaded region if prob_type is selected
+                if self.prob_type_dropdown.value != "":
+                    self.show_shaded_region_flag = True
+                else:
+                    self.show_shaded_region_flag = False
                 # Update slider visibility based on current prob_type
                 self._update_slider_visibility()
                 # Show probability controls
@@ -715,6 +746,20 @@ class DistributionProbabilityVisualization:
         
     def _update_bound_sliders(self, reset_to_full_range=False):
         """Update bound slider ranges to match the plot's x-axis range"""
+        # If prob_type is empty, set bounds off-screen and return early
+        if self.prob_type_dropdown.value == "":
+            # Set bounds to very negative and very positive values to keep them off-screen
+            # Expand range first to avoid conflicts
+            wide_min = min(self.bound1_slider.min, self.bound2_slider.min, -1e10)
+            wide_max = max(self.bound1_slider.max, self.bound2_slider.max, 1e10)
+            self.bound1_slider.max = wide_max
+            self.bound2_slider.max = wide_max
+            self.bound1_slider.min = wide_min
+            self.bound2_slider.min = wide_min
+            self.bound1_slider.value = -1e10
+            self.bound2_slider.value = 1e10
+            return
+        
         dist_type = self.dist_dropdown.value
         dist_category = self.category_dropdown.value
         
@@ -904,8 +949,8 @@ class DistributionProbabilityVisualization:
                     unique_vals, counts = np.unique(self.samples, return_counts=True)
                     counts = counts / len(self.samples)  # Normalize to probability
                     
-                    # Only show red highlighting when shaded region is shown
-                    if show_shaded_region:
+                    # Only show red highlighting when shaded region is shown and prob_type is not empty
+                    if show_shaded_region and prob_type != "":
                         # Determine which values are in the selected region (inclusive bounds)
                         if prob_type == "of outcome":
                             selected_mask = unique_vals == int(np.round(bound1))
@@ -955,8 +1000,8 @@ class DistributionProbabilityVisualization:
                         opacity=0.7
                     ))
                     
-                    # Only shade histogram for probability region when shaded region is shown (inclusive bounds)
-                    if show_shaded_region:
+                    # Only shade histogram for probability region when shaded region is shown and prob_type is not empty (inclusive bounds)
+                    if show_shaded_region and prob_type != "":
                         if prob_type == "under upper bound":
                             mask = bin_centers <= bound2  # Inclusive upper bound
                             if np.any(mask):
@@ -998,8 +1043,8 @@ class DistributionProbabilityVisualization:
             if show_pdf and pdf_pmf_values is not None:
                 # Plot PDF/PMF overlay
                 if dist_category == "Discrete":
-                    # Determine which PMF values are in the selected region (inclusive bounds) - only if shaded region is shown
-                    if show_shaded_region:
+                    # Determine which PMF values are in the selected region (inclusive bounds) - only if shaded region is shown and prob_type is not empty
+                    if show_shaded_region and prob_type != "":
                         if prob_type == "of outcome":
                             pmf_selected_mask = x_range == int(np.round(bound1))
                         elif prob_type == "under upper bound":
@@ -1044,8 +1089,8 @@ class DistributionProbabilityVisualization:
                         showlegend=True
                     ))
             
-            # Add shaded area and vertical lines only if shaded region is shown
-            if show_shaded_region:
+            # Add shaded area and vertical lines only if shaded region is shown and prob_type is not empty
+            if show_shaded_region and prob_type != "":
                 # Determine which region to shade based on prob_type (inclusive bounds)
                 if prob_type == "of outcome":
                     shade_x = [bound1, bound1]
@@ -1155,25 +1200,34 @@ class DistributionProbabilityVisualization:
             fig.update_yaxes(title_text="Density")
             fig.update_layout(height=600, showlegend=True, title="Histogram of Samples and PDF/PMF")
             
-            # Compute probabilities
-            est_prob = compute_estimated_probability(self.samples, prob_type, bound1, bound2)
-            if show_pdf:
-                true_prob = compute_true_probability(dist_type, dist_category, prob_type, bound1, bound2, **params)
-                # Update probability label
+            # Compute probabilities (only if prob_type is not empty)
+            if prob_type == "":
+                # Show N/A when no interval type is selected
                 self.prob_label.value = (
-                    f'<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
-                    f'<b>Estimated Probability (from samples):</b> <span style="color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{est_prob:.4f}</span><br><br>'
-                    f'<b>True Probability (from {("CDF" if dist_category == "Continuous" else "PMF")}):</b> <span style="color: #cc6600; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{true_prob:.4f}</span>'
-                    f'</div>'
+                    '<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
+                    '<b>Estimated Probability:</b> <span style="color: #999; font-size: 16px;">N/A (select an interval type above)</span><br><br>'
+                    '<b>True Probability:</b> <span style="color: #999; font-size: 16px;">N/A (select an interval type above)</span>'
+                    '</div>'
                 )
             else:
-                # Only show estimated probability when PDF is not shown
-                self.prob_label.value = (
-                    f'<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
-                    f'<b>Estimated Probability (from samples):</b> <span style="color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{est_prob:.4f}</span><br><br>'
-                    f'<b>True Probability:</b> <span style="color: #999; font-size: 16px;">N/A (click "Show PDF/PMF" to see comparison)</span>'
-                    f'</div>'
-                )
+                est_prob = compute_estimated_probability(self.samples, prob_type, bound1, bound2)
+                if show_pdf:
+                    true_prob = compute_true_probability(dist_type, dist_category, prob_type, bound1, bound2, **params)
+                    # Update probability label
+                    self.prob_label.value = (
+                        f'<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
+                        f'<b>Estimated Probability (from samples):</b> <span style="color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{est_prob:.4f}</span><br><br>'
+                        f'<b>True Probability (from {("CDF" if dist_category == "Continuous" else "PMF")}):</b> <span style="color: #cc6600; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{true_prob:.4f}</span>'
+                        f'</div>'
+                    )
+                else:
+                    # Only show estimated probability when PDF is not shown
+                    self.prob_label.value = (
+                        f'<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
+                        f'<b>Estimated Probability (from samples):</b> <span style="color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{est_prob:.4f}</span><br><br>'
+                        f'<b>True Probability:</b> <span style="color: #999; font-size: 16px;">N/A (click "Show PDF/PMF" to see comparison)</span>'
+                        f'</div>'
+                    )
             
             fig.show()
             
