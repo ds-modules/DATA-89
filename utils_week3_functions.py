@@ -260,7 +260,7 @@ def create_simple_function(func_type, a, b, c):
         def func(x):
             return np.power(np.maximum(x, 0), 1/root_val)
         domain = (0, 10)
-        label = f"x^(1/{root_val:.0f})"
+        label = f"x^(1/{root_val:.2g})"
         
     elif func_type == "Exponential":
         base = max(b, 0.1)
@@ -358,7 +358,8 @@ def _get_transformed_formula_string(func_type, a, b, c, h_shift, v_shift, h_scal
     elif func_type == "Power":
         base_expr = f"({x_inner})^{a:.2g}"
     elif func_type == "Root":
-        base_expr = f"({x_inner})^(1/{a:.0f})"
+        root_val = max(a, 2)
+        base_expr = f"({x_inner})^(1/{root_val:.2g})"
     elif func_type == "Exponential":
         base = max(b, 0.1)
         base_expr = f"{a:.2g}·{base:.2g}^({x_inner})"
@@ -881,7 +882,7 @@ class FunctionInverseVisualization:
         self.plot_output = widgets.Output()
         self.function_types = MONOTONIC_FUNCTION_TYPES
         self.show_inverse = False  # Show inverse at cursor (box + point) when True
-        self.show_inverse_curve = False  # Full f^{-1} curve only after "Reveal inverse"
+        self.show_inverse_curve = False  # Full f^{-1} curve only after "Reveal Function"
         self.saved_inverse_points = []  # List of (inv_x, inv_y) = (f(x), x)
         
         self._create_widgets()
@@ -963,22 +964,22 @@ class FunctionInverseVisualization:
             layout=widgets.Layout(width='300px')
         )
         
-        # Show inverse toggle
+        # Calculate inverse at cursor (reflection box)
         self.inverse_button = widgets.ToggleButton(
             value=False,
-            description='Show Inverse',
+            description='Calculate Inverse',
             button_style='info',
             layout=widgets.Layout(width='150px')
         )
         
-        # Save point and Reveal inverse (parallel to Composition)
+        # Save point and Reveal Function (parallel to Composition)
         self.save_point_button = widgets.Button(
             description="Save point",
             button_style='success',
             layout=widgets.Layout(width='120px')
         )
         self.reveal_inverse_button = widgets.Button(
-            description="Reveal inverse",
+            description="Reveal Function",
             button_style='info',
             layout=widgets.Layout(width='130px')
         )
@@ -1037,13 +1038,13 @@ class FunctionInverseVisualization:
         self._update_plot()
         
     def _on_inverse_toggle(self, change):
-        """Handle inverse toggle"""
+        """Handle inverse toggle (reflection box at cursor)"""
         self.show_inverse = change['new']
         # Update button text dynamically
         if self.show_inverse:
-            self.inverse_button.description = 'Hide Inverse'
+            self.inverse_button.description = 'Hide'
         else:
-            self.inverse_button.description = 'Show Inverse'
+            self.inverse_button.description = 'Calculate Inverse'
         self._update_plot()
         
     def _on_save_point(self, button):
@@ -1070,7 +1071,7 @@ class FunctionInverseVisualization:
     def _on_reveal_inverse(self, button):
         """Show the full f^{-1} curve"""
         self.show_inverse_curve = True
-        self.inverse_status_html.value = '<div style="padding: 4px; font-size: 12px; color: #666;">Inverse revealed.</div>'
+        self.inverse_status_html.value = '<div style="padding: 4px; font-size: 12px; color: #666;">Inverse function revealed.</div>'
         self._update_plot()
     
     def _on_reset(self, button):
@@ -1150,7 +1151,7 @@ class FunctionInverseVisualization:
                               line=dict(color='white', width=2))
                 ))
             
-            # Full inverse curve only when "Reveal inverse" has been clicked
+            # Full inverse curve only when "Reveal Function" has been clicked
             if self.show_inverse_curve and inv_func is not None:
                 y_finite = y[np.isfinite(y)]
                 if len(y_finite) > 0:
@@ -1688,22 +1689,22 @@ class FunctionCombinationVisualization:
                 fig.add_trace(go.Scatter(x=x, y=second_y, mode='lines', name=second_name,
                                         line=dict(color='green', width=2)), row=1, col=1)
                 
-                # Product panel: dashed multiples and solid product only when show_combo
+                # Product panel: grey dashed multiples always visible
+                multiples = np.arange(-4, 4.5, 0.5)
+                for mult in multiples:
+                    if mult == 0:
+                        continue
+                    # Multiples in product space: (mult * first) * second
+                    mult_product_y = (mult * first_y) * second_y
+                    fig.add_trace(go.Scatter(
+                        x=x, y=mult_product_y, mode='lines',
+                        name=f'{mult:.1f}·{first_name}·{second_name}' if mult in [-4, -2, 2, 4] else '',
+                        line=dict(color='gray', width=1.5, dash='dash'),
+                        opacity=0.7,
+                        showlegend=(mult in [-4, -2, 2, 4])
+                    ), row=1, col=2)
+                # Solid product curve (1× first factor) only when revealed
                 if self.show_combo:
-                    multiples = np.arange(-4, 4.5, 0.5)
-                    for mult in multiples:
-                        if mult == 0:
-                            continue
-                        # Multiples in product space: (mult * first) * second
-                        mult_product_y = (mult * first_y) * second_y
-                        fig.add_trace(go.Scatter(
-                            x=x, y=mult_product_y, mode='lines',
-                            name=f'{mult:.1f}·{first_name}·{second_name}' if mult in [-4, -2, 2, 4] else '',
-                            line=dict(color='gray', width=1.5, dash='dash'),
-                            opacity=0.7,
-                            showlegend=(mult in [-4, -2, 2, 4])
-                        ), row=1, col=2)
-                    # Main product (1× first factor): solid, thicker, gently highlighted
                     fig.add_trace(go.Scatter(
                         x=x, y=product_y, mode='lines', name='h(x) = 1·f·g',
                         line=dict(color='red', width=4),
@@ -1777,12 +1778,17 @@ class FunctionCombinationVisualization:
             self.display_dropdown,
             self.product_order,
             self.weights_box,
+        ], layout=widgets.Layout(padding='10px', border='1px solid #ddd', margin='5px'))
+        
+        # Cursor control (slider + buttons), same-level box as f_box, g_box, mode_box
+        cursor_box = widgets.VBox([
+            widgets.HTML('<h4>Cursor Control</h4>'),
             self.x_slider,
             widgets.HBox([self.save_point_button, self.reveal_combo_button]),
             self.reset_button,
         ], layout=widgets.Layout(padding='10px', border='1px solid #ddd', margin='5px'))
         
-        left_panel = widgets.VBox([f_box, g_box, mode_box], layout=widgets.Layout(width='360px'))
+        left_panel = widgets.VBox([f_box, g_box, mode_box, cursor_box], layout=widgets.Layout(width='360px'))
         
         right_panel = widgets.VBox([
             self.formula_html,
@@ -1931,8 +1937,10 @@ class FunctionCompositionVisualization:
         elif func_type in ["Power", "Root"]:
             b_slider.layout.visibility = 'hidden'
             c_slider.layout.visibility = 'hidden'
-            if func_type == "Root" and a_slider.value < 2:
-                a_slider.value = 2
+            if func_type == "Root":
+                a_slider.min, a_slider.max = 2, 10
+                if a_slider.value < 2:
+                    a_slider.value = 2
         elif func_type in ["Exponential", "Logarithm"]:
             b_slider.layout.visibility = 'visible'
             c_slider.layout.visibility = 'hidden'
@@ -1954,8 +1962,8 @@ class FunctionCompositionVisualization:
         self._update_plot()
     
     def _on_x_change(self, change):
-        if self.show_construction:
-            self._update_plot()
+        """Update plot when x value changes (input point and, if active, construction)"""
+        self._update_plot()
     
     def _reset_state(self):
         """Reset composition state"""
@@ -1992,11 +2000,11 @@ class FunctionCompositionVisualization:
         )
         
         with np.errstate(all='ignore'):
-            inner_val = inner_func(x_val)
-            composite_val = outer_func(inner_val)
+            inner_val = float(inner_func(x_val))
+            composite_val = float(outer_func(inner_val))
         
         if np.isfinite(composite_val):
-            self.saved_points.append((x_val, composite_val))
+            self.saved_points.append((float(x_val), composite_val))
             self.status_html.value = f'<div style="padding: 10px; background-color: #d4edda; border-radius: 5px;">Saved point ({x_val:.2f}, {composite_val:.2f}). {len(self.saved_points)} points saved.</div>'
         
         self._update_plot()
