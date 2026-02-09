@@ -20,6 +20,11 @@ FUNCTION_TYPES = [
 # Nonnegative outer functions (e.g. negative powers, exponential, bump)
 OUTER_FUNCTION_TYPES = ["Power", "Root", "Exponential", "Bump (Normal)"]
 
+# Default 3D axis ranges (locked until data exceeds them)
+DEFAULT_AXIS_X = (-2, 2)
+DEFAULT_AXIS_Y = (-1, 3)
+DEFAULT_AXIS_Z = (0, 4)
+
 
 def create_simple_function(func_type, a, b, c):
     """
@@ -59,6 +64,8 @@ def create_simple_function(func_type, a, b, c):
 
     elif func_type == "Exponential":
         base = max(b, 0.1)
+        if base == 1:
+            base = 2  # base 1 gives constant function
         def func(x):
             return a * np.power(base, x)
         domain = (-5, 5)
@@ -130,7 +137,7 @@ class Composite3DVisualization:
         )
         self.outer_a = widgets.FloatSlider(value=0.7, min=-3, max=3, step=0.1, description='a:',
             style={'description_width': 'initial'}, layout=widgets.Layout(width='250px'))
-        self.outer_b = widgets.FloatSlider(value=1, min=0.1, max=5, step=0.1, description='b:',
+        self.outer_b = widgets.FloatSlider(value=2, min=0.1, max=5, step=0.1, description='b:',
             style={'description_width': 'initial'}, layout=widgets.Layout(width='250px'))
         self.outer_c = widgets.FloatSlider(value=0.5, min=0.2, max=3, step=0.1, description='c:',
             style={'description_width': 'initial'}, layout=widgets.Layout(width='250px'))
@@ -181,6 +188,8 @@ class Composite3DVisualization:
             self.outer_c.layout.visibility = 'hidden'
             self.outer_a.min, self.outer_a.max = 0.1, 3
             self.outer_b.min, self.outer_b.max = 0.5, 3
+            if self.outer_b.value == 1:
+                self.outer_b.value = 2  # base 1 gives constant function
         elif t == "Bump (Normal)":
             self.outer_b.layout.visibility = 'visible'
             self.outer_c.layout.visibility = 'visible'
@@ -208,8 +217,8 @@ class Composite3DVisualization:
         elif t in ["Exponential", "Logarithm"]:
             self.inner_b.layout.visibility = 'visible'
             self.inner_c.layout.visibility = 'hidden'
-            if self.inner_b.value <= 0:
-                self.inner_b.value = 2
+            if self.inner_b.value <= 0 or (t == "Exponential" and self.inner_b.value == 1):
+                self.inner_b.value = 2  # base 1 gives constant function for exp; log needs base != 1
         elif t == "Bump (Normal)":
             self.inner_b.layout.visibility = 'visible'
             self.inner_c.layout.visibility = 'visible'
@@ -272,6 +281,11 @@ class Composite3DVisualization:
             y_min = min(y_min, 0) - 0.1 * y_span
             y_max = y_max + 0.1 * y_span
 
+            # Data bounds for axis ranges (start from data; we'll merge with defaults)
+            x_lo, x_hi = x_min, x_max
+            y_lo, y_hi = y_min, y_max
+            z_lo, z_hi = 0.0, 0.0
+
             fig = go.Figure()
 
             # Axis convention: Plotly (x, y, z) = (x input, f_in(x), f_out(f_in(x)))
@@ -292,6 +306,10 @@ class Composite3DVisualization:
                 with np.errstate(all='ignore'):
                     f_out_vals = outer_func(t_outer)
                     f_out_vals = np.where(np.isfinite(f_out_vals), f_out_vals, np.nan)
+                f_out_finite = f_out_vals[np.isfinite(f_out_vals)]
+                if len(f_out_finite) > 0:
+                    z_lo = min(z_lo, float(np.min(f_out_finite)))
+                    z_hi = max(z_hi, float(np.max(f_out_finite)))
                 fig.add_trace(go.Scatter3d(
                     x=np.zeros_like(t_outer), y=t_outer, z=f_out_vals,
                     mode='lines', name='f_out (outer)',
@@ -305,6 +323,10 @@ class Composite3DVisualization:
                 with np.errstate(all='ignore'):
                     Z = outer_func(Y)
                     Z = np.where(np.isfinite(Z), Z, np.nan)
+                z_finite = Z[np.isfinite(Z)]
+                if len(z_finite) > 0:
+                    z_lo = min(z_lo, float(np.min(z_finite)))
+                    z_hi = max(z_hi, float(np.max(z_finite)))
                 fig.add_trace(go.Surface(
                     x=X, y=Y, z=Z,
                     name='z = f_out(y)',
@@ -316,6 +338,10 @@ class Composite3DVisualization:
                 with np.errstate(all='ignore'):
                     comp_vals = outer_func(f_in_vals)
                     comp_vals = np.where(np.isfinite(comp_vals), comp_vals, np.nan)
+                comp_finite = comp_vals[np.isfinite(comp_vals)]
+                if len(comp_finite) > 0:
+                    z_lo = min(z_lo, float(np.min(comp_finite)))
+                    z_hi = max(z_hi, float(np.max(comp_finite)))
                 # 3D composite curve: (x, f_in(x), f_out(f_in(x)))
                 fig.add_trace(go.Scatter3d(
                     x=x_pts, y=f_in_vals, z=comp_vals,
@@ -336,6 +362,12 @@ class Composite3DVisualization:
                     y_c = float(inner_func(x_c))
                     z_c = float(outer_func(y_c))
                 if np.isfinite(y_c) and np.isfinite(z_c):
+                    x_lo = min(x_lo, x_c)
+                    x_hi = max(x_hi, x_c)
+                    y_lo = min(y_lo, y_c)
+                    y_hi = max(y_hi, y_c)
+                    z_lo = min(z_lo, z_c)
+                    z_hi = max(z_hi, z_c)
                     # (i) [x, f_in(x), 0]
                     fig.add_trace(go.Scatter3d(
                         x=[x_c], y=[y_c], z=[0],
@@ -367,20 +399,35 @@ class Composite3DVisualization:
                         line=dict(color='gray', width=2, dash='dash')
                     ))
 
+            # Lock axes to default ranges; expand only if data exceeds them
+            range_x = (min(DEFAULT_AXIS_X[0], x_lo), max(DEFAULT_AXIS_X[1], x_hi))
+            range_y = (min(DEFAULT_AXIS_Y[0], y_lo), max(DEFAULT_AXIS_Y[1], y_hi))
+            range_z = (min(DEFAULT_AXIS_Z[0], z_lo), max(DEFAULT_AXIS_Z[1], z_hi))
+
             fig.update_layout(
                 title='Composition f_out(f_in(x))',
                 scene=dict(
                     xaxis_title='x',
                     yaxis_title='f<sub>in</sub>(x)',
                     zaxis_title='f<sub>out</sub>(f<sub>in</sub>(x))',
-                    aspectmode='data',
+                    aspectmode='cube',
+                    xaxis=dict(
+                        range=range_x,
+                        backgroundcolor='rgb(248,248,248)', gridcolor='lightgray'
+                    ),
+                    yaxis=dict(
+                        range=range_y,
+                        backgroundcolor='rgb(248,248,248)', gridcolor='lightgray'
+                    ),
+                    zaxis=dict(
+                        range=range_z,
+                        backgroundcolor='rgb(248,248,248)', gridcolor='lightgray'
+                    ),
                     camera=dict(
                         center=dict(x=0, y=0, z=0),
-                        eye=dict(x=1.6, y=1.6, z=1.2)
+                        eye=dict(x=1.6, y=1.6, z=1.2),
+                        projection=dict(type='orthographic')
                     ),
-                    xaxis=dict(backgroundcolor='rgb(248,248,248)', gridcolor='lightgray'),
-                    yaxis=dict(backgroundcolor='rgb(248,248,248)', gridcolor='lightgray'),
-                    zaxis=dict(backgroundcolor='rgb(248,248,248)', gridcolor='lightgray'),
                 ),
                 width=700,
                 height=650,
