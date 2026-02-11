@@ -25,6 +25,11 @@ DEFAULT_AXIS_X = (-2, 2)
 DEFAULT_AXIS_Y = (-1, 3)
 DEFAULT_AXIS_Z = (0, 4)
 
+# Maximum axis bounds (don't scale arbitrarily large)
+AXIS_X_MIN, AXIS_X_MAX = -10, 10
+AXIS_Y_MIN, AXIS_Y_MAX = -10, 10
+AXIS_Z_MIN, AXIS_Z_MAX = -10, 10
+
 
 def create_simple_function(func_type, a, b, c):
     """
@@ -399,10 +404,19 @@ class Composite3DVisualization:
                         line=dict(color='gray', width=2, dash='dash')
                     ))
 
-            # Lock axes to default ranges; expand only if data exceeds them
-            range_x = (min(DEFAULT_AXIS_X[0], x_lo), max(DEFAULT_AXIS_X[1], x_hi))
-            range_y = (min(DEFAULT_AXIS_Y[0], y_lo), max(DEFAULT_AXIS_Y[1], y_hi))
-            range_z = (min(DEFAULT_AXIS_Z[0], z_lo), max(DEFAULT_AXIS_Z[1], z_hi))
+            # Lock axes to default ranges; expand only if data exceeds them; cap at max bounds
+            range_x = (
+                max(AXIS_X_MIN, min(DEFAULT_AXIS_X[0], x_lo)),
+                min(AXIS_X_MAX, max(DEFAULT_AXIS_X[1], x_hi))
+            )
+            range_y = (
+                max(AXIS_Y_MIN, min(DEFAULT_AXIS_Y[0], y_lo)),
+                min(AXIS_Y_MAX, max(DEFAULT_AXIS_Y[1], y_hi))
+            )
+            range_z = (
+                max(AXIS_Z_MIN, min(DEFAULT_AXIS_Z[0], z_lo)),
+                min(AXIS_Z_MAX, max(DEFAULT_AXIS_Z[1], z_hi))
+            )
 
             fig.update_layout(
                 title='Composition f_out(f_in(x))',
