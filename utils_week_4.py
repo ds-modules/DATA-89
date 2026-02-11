@@ -259,10 +259,10 @@ class Composite3DVisualization:
     def _update_plot(self):
         with self.plot_output:
             clear_output(wait=True)
-            if not (self.show_inner or self.show_outer or self.show_compose):
-                display(widgets.HTML('<p style="color:#666;">Use the buttons to show inner, outer, or composed functions. Move the cursor to trace x → f_in(x) → f_out(f_in(x)).</p>'))
-                return
 
+            # Always recompute functions and update the formula text so that the
+            # f_in(x) and f_out(x) labels react immediately when sliders move,
+            # even before any of the display buttons are clicked.
             inner_func, inner_domain, inner_label = create_simple_function(
                 self.inner_type.value, self.inner_a.value, self.inner_b.value, self.inner_c.value
             )
@@ -272,16 +272,29 @@ class Composite3DVisualization:
             self.inner_formula_html.value = f'<div style="padding: 6px; font-size: 14px;"><b>f_in(x) =</b> {inner_label}</div>'
             self.outer_formula_html.value = f'<div style="padding: 6px; font-size: 14px;"><b>f_out(x) =</b> {outer_label}</div>'
 
+            # If no plots are selected yet, just show a short instruction message
+            # (but keep the updated text boxes above the sliders).
+            if not (self.show_inner or self.show_outer or self.show_compose):
+                display(widgets.HTML('<p style="color:#666;">Use the buttons to show inner, outer, or composed functions. Move the cursor to trace x → f_in(x) → f_out(f_in(x)).</p>'))
+                return
+
             x_min = max(inner_domain[0], -4)
             x_max = min(inner_domain[1], 4)
             x_pts = np.linspace(x_min, x_max, 200)
             with np.errstate(all='ignore'):
                 f_in_vals = inner_func(x_pts)
                 f_in_vals = np.where(np.isfinite(f_in_vals), f_in_vals, np.nan)
+            # Raw f_in(x) range (used to anchor the z = f_out(y) surface so it
+            # follows the composite curve and does not \"break\")
             y_range = np.nanmin(f_in_vals), np.nanmax(f_in_vals)
             if np.isnan(y_range[0]):
                 y_range = (0, 1)
-            y_min, y_max = y_range[0], y_range[1]
+            raw_y_min, raw_y_max = y_range[0], y_range[1]
+
+            # Slightly padded range for axis limits only (not for the surface),
+            # so the visible box has a margin but the z = f_out(y) plane stays
+            # aligned with the actual f_in(x) values.
+            y_min, y_max = raw_y_min, raw_y_max
             y_span = max(y_max - y_min, 0.5)
             y_min = min(y_min, 0) - 0.1 * y_span
             y_max = y_max + 0.1 * y_span
@@ -306,8 +319,15 @@ class Composite3DVisualization:
                 ))
 
             if self.show_outer:
-                # Outer function in back plane x=0: (0, t, f_out(t)); t = f_in
-                t_outer = np.linspace(max(outer_domain[0], y_min), min(outer_domain[1], y_max), 200)
+                # Outer function in back plane x=0: (0, t, f_out(t)); t = f_in.
+                # Use the *raw* f_in range (without extra padding) so that this
+                # curve and the z = f_out(y) surface follow the composite curve
+                # and do not \"jump\" or rise above it when functions change.
+                t_outer = np.linspace(
+                    max(outer_domain[0], raw_y_min),
+                    min(outer_domain[1], raw_y_max),
+                    200
+                )
                 with np.errstate(all='ignore'):
                     f_out_vals = outer_func(t_outer)
                     f_out_vals = np.where(np.isfinite(f_out_vals), f_out_vals, np.nan)
@@ -320,14 +340,19 @@ class Composite3DVisualization:
                     mode='lines', name='f_out (outer)',
                     line=dict(color='green', width=6)
                 ))
-                # Surface z = f_out(y) over (x, y)
+                # Surface z = f_out(y) over (x, y). Again, use the raw f_in
+                # range so the sheet stays aligned with the composite curve.
                 nx, ny = 25, 25
                 x_surf = np.linspace(x_min, x_max, nx)
-                y_surf = np.linspace(y_min, y_max, ny)
+                y_surf = np.linspace(raw_y_min, raw_y_max, ny)
                 X, Y = np.meshgrid(x_surf, y_surf)
                 with np.errstate(all='ignore'):
                     Z = outer_func(Y)
                     Z = np.where(np.isfinite(Z), Z, np.nan)
+                # Clip surface to visible z range so it doesn't rise above the box
+                # (e.g. when outer is Power with negative exponent, f_out(y) blows up near 0)
+                z_cap_lo, z_cap_hi = 0.0, float(AXIS_Z_MAX)
+                Z = np.where(np.isfinite(Z), np.clip(Z, z_cap_lo, z_cap_hi), np.nan)
                 z_finite = Z[np.isfinite(Z)]
                 if len(z_finite) > 0:
                     z_lo = min(z_lo, float(np.min(z_finite)))
@@ -404,7 +429,7 @@ class Composite3DVisualization:
                         line=dict(color='gray', width=2, dash='dash')
                     ))
 
-            # Lock axes to default ranges; expand only if data exceeds them; cap at max bounds
+            # Lock X/Y axes to default ranges; expand only if data exceeds them; cap at max bounds
             range_x = (
                 max(AXIS_X_MIN, min(DEFAULT_AXIS_X[0], x_lo)),
                 min(AXIS_X_MAX, max(DEFAULT_AXIS_X[1], x_hi))
@@ -413,10 +438,22 @@ class Composite3DVisualization:
                 max(AXIS_Y_MIN, min(DEFAULT_AXIS_Y[0], y_lo)),
                 min(AXIS_Y_MAX, max(DEFAULT_AXIS_Y[1], y_hi))
             )
-            range_z = (
-                max(AXIS_Z_MIN, min(DEFAULT_AXIS_Z[0], z_lo)),
-                min(AXIS_Z_MAX, max(DEFAULT_AXIS_Z[1], z_hi))
-            )
+
+            # Vertical axis (z = f_out(f_in(x))): scale with the height of f_out,
+            # but keep a reasonable minimum and maximum.
+            # Let b_raw = 1.2 * max(f_out); then:
+            # - if b_raw > 10, use b = 10
+            # - if b_raw < 1, use b = 1
+            # - otherwise use b = b_raw
+            max_outer = max(0.0, z_hi)
+            b_raw = 1.2 * max_outer
+            if b_raw > 10:
+                b = 10.0
+            elif b_raw < 1:
+                b = 1.0
+            else:
+                b = float(b_raw)
+            range_z = (0.0, b)
 
             fig.update_layout(
                 title='Composition f_out(f_in(x))',
