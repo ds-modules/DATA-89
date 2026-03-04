@@ -109,10 +109,20 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
     """
     Extended distribution explorer: Student-t (continuous), Power law (discrete),
     and log-scale toggles for x and y axes (x log only when RV is nonnegative).
+
+    Optionally supports locking the distribution/category so the visualization
+    can be embedded for a specific choice (e.g. only show Power law).
     """
 
-    def __init__(self):
+    def __init__(self, initial_dist_type=None, lock_distribution=False):
+        """
+        initial_dist_type: optional name of distribution to start with
+                           (e.g. \"Power law\" or \"Student-t\").
+        lock_distribution: if True, keep only that distribution visible and
+                           disable the type/dist dropdowns.
+        """
         super().__init__()
+        self.lock_distribution = lock_distribution
         # Add new distributions
         self.continuous_dists = list(self.continuous_dists) + ["Student-t"]
         self.discrete_dists = list(self.discrete_dists) + ["Power law"]
@@ -124,7 +134,7 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
                 min=0.5,
                 max=20,
                 step=0.5,
-                description="df:",
+                description="nu:",
                 style={"description_width": "initial"},
             )
         ]
@@ -169,15 +179,38 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
 
         # Enable/disable log-x based on whether RV is nonnegative
         self._update_log_x_enabled()
+        # If an initial distribution is specified and we want to lock it,
+        # configure the dropdowns accordingly.
+        if initial_dist_type is not None:
+            # Decide category from name
+            if initial_dist_type in self.discrete_dists:
+                self.category_dropdown.value = "Discrete"
+                self.dist_dropdown.options = self.discrete_dists
+            elif initial_dist_type in self.continuous_dists:
+                self.category_dropdown.value = "Continuous"
+                self.dist_dropdown.options = self.continuous_dists
+            # Set the specific distribution if it exists
+            if initial_dist_type in self.dist_dropdown.options:
+                self.dist_dropdown.value = initial_dist_type
+        if self.lock_distribution:
+            # Restrict dropdowns to the chosen type/dist
+            current_type = self.category_dropdown.value
+            current_dist = self.dist_dropdown.value
+            self.category_dropdown.options = [current_type]
+            self.dist_dropdown.options = [current_dist]
+            self.category_dropdown.disabled = True
+            self.dist_dropdown.disabled = True
 
     def _is_nonnegative_rv(self):
         """True if the current distribution has nonnegative support (so x log scale is allowed)."""
         dist_type = self.dist_dropdown.value
         dist_category = self.category_dropdown.value
+        # Discrete distributions here are nonnegative, so allow log-x as well
+        # (bars will still have equal numeric width, though they look compressed
+        # on the right when plotted on a log axis).
         if dist_category == "Discrete":
-            # All discrete options here have nonnegative support
             return True
-        # Continuous
+        # Continuous nonnegative supports
         if dist_type in ("Exponential", "Pareto", "Beta", "Gamma"):
             return True
         if dist_type == "Uniform":
@@ -269,7 +302,11 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
                         x=x_range,
                         y=pdf_pmf_values,
                         name="PMF",
-                        marker=dict(color="rgba(255,165,0,0.8)", line=dict(color="orange", width=2)),
+                        marker=dict(
+                            color="rgba(255,165,0,0.8)",
+                            line=dict(color="orange", width=2),
+                        ),
+                        width=0.5,  # fixed bin width in data units
                         showlegend=True,
                         opacity=0.8,
                     )
@@ -286,14 +323,55 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
                     )
                 )
 
+            # Choose fixed y-axis limits for certain examples to make parameter
+            # changes visually comparable.
+            y_min = 0.0
+            y_max = None
+            if dist_type == "Power law" and dist_category == "Discrete":
+                # PMF is at most 1; lock to [0, 1].
+                y_max = 1.0
+            elif dist_type == "Exponential" and dist_category == "Continuous":
+                # With scale in [0.1, 5], the max density is 1/scale_min = 10.
+                # Lock to a bit above that.
+                y_max = 10.0
+
             fig.update_xaxes(title_text="x")
-            fig.update_yaxes(title_text="Density")
             if log_x:
-                fig.update_xaxes(type="log")
-                fig.update_xaxes(range=[max(0.01, x_min), x_max])
+                # Keep the numeric domain the same when switching to log scale.
+                # For Power law, this means the visible range stays 1–50.
+                # Plotly expects the range in log10 units for log axes.
+                if x_max <= 0:
+                    # Fallback if something degenerate happens; should not occur for nonnegative RVs.
+                    x_max_effective = 1.0
+                else:
+                    x_max_effective = x_max
+                # For the lower bound, if x_min is <= 0, bump slightly above 0,
+                # otherwise keep x_min as-is so the numeric range is preserved.
+                if x_min > 0:
+                    x_min_effective = x_min
+                else:
+                    x_min_effective = x_max_effective / 1000.0
+                fig.update_xaxes(
+                    type="log",
+                    range=[np.log10(x_min_effective), np.log10(x_max_effective)],
+                )
+
             if log_y:
-                fig.update_yaxes(type="log")
-                fig.update_yaxes(rangemode="tozero")
+                if y_max is not None:
+                    # Lock log-y between a small positive floor and y_max.
+                    y_min_eff = max(1e-4, y_min if y_min > 0 else 1e-4)
+                    fig.update_yaxes(
+                        title_text="Density",
+                        type="log",
+                        range=[np.log10(y_min_eff), np.log10(y_max)],
+                    )
+                else:
+                    fig.update_yaxes(title_text="Density", type="log", rangemode="tozero")
+            else:
+                if y_max is not None:
+                    fig.update_yaxes(title_text="Density", range=[y_min, y_max])
+                else:
+                    fig.update_yaxes(title_text="Density")
             fig.update_layout(
                 height=600, showlegend=True, title="PDF/PMF for Selected Distribution"
             )
@@ -319,8 +397,24 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
         display(widgets.HBox([controls, self.plot_output]))
 
 
-def run_distribution_explorer_51():
-    """Create and display the §5.1 alternate distribution visualization."""
-    viz = DistributionProbabilityVisualization51()
+def run_distribution_explorer_51(dist_type=None, lock_distribution=False):
+    """
+    Create and display the §5.1 alternate distribution visualization.
+
+    Parameters
+    ----------
+    dist_type : str or None
+        Optional name of the distribution to start with (e.g. \"Power law\",
+        \"Student-t\", \"Normal\", etc.). If provided together with
+        lock_distribution=True, only this distribution will be available
+        in the UI.
+    lock_distribution : bool
+        If True and dist_type is given, lock the visualization to that
+        distribution (type and distribution dropdowns are disabled).
+    """
+    viz = DistributionProbabilityVisualization51(
+        initial_dist_type=dist_type,
+        lock_distribution=lock_distribution,
+    )
     viz.display()
     return viz
