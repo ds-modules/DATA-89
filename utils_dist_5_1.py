@@ -270,8 +270,17 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
             x_min = 1
             x_max = 50
             return x_min, x_max
+        if dist_type == "Exponential":
+            # Exponential support is [0, ∞); use a fixed, non-centered window
+            # so 0 is at the left edge rather than the center.
+            return -0.5, 10.0
+        if dist_type == "Pareto":
+            # Pareto support is [scale, ∞); use a similar fixed window as
+            # exponential so we can compare tails across parameter values.
+            return -0.5, 10.0
         if dist_type == "Student-t" and len(self.samples) == 0:
-            return -5, 5
+            # Wider window to better show heavy tails
+            return -8.0, 8.0
         return super()._get_x_axis_range()
 
     def _update_plot(self, change=None):
@@ -324,7 +333,7 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
                 )
 
             # Choose fixed y-axis limits for certain examples to make parameter
-            # changes visually comparable.
+            # changes visually comparable and avoid auto-scaling.
             y_min = 0.0
             y_max = None
             if dist_type == "Power law" and dist_category == "Discrete":
@@ -334,6 +343,17 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
                 # With scale in [0.1, 5], the max density is 1/scale_min = 10.
                 # Lock to a bit above that.
                 y_max = 10.0
+            elif dist_type == "Normal" and dist_category == "Continuous":
+                # Fix a reasonable range for Gaussian PDFs so that changing
+                # parameters does not rescale the vertical axis.
+                y_max = 5.0
+            elif dist_type == "Student-t" and dist_category == "Continuous":
+                # For Student-t in this demo, keep the vertical range narrower
+                # so changes in nu are more visually apparent.
+                y_max = 1.0
+            elif dist_type == "Pareto" and dist_category == "Continuous":
+                # Fix Pareto vertical scale to match other heavy-tailed examples.
+                y_max = 5.0
 
             fig.update_xaxes(title_text="x")
             if log_x:
