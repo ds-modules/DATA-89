@@ -277,7 +277,9 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
         if dist_type == "Pareto":
             # Pareto support is [scale, ∞); use a similar fixed window as
             # exponential so we can compare tails across parameter values.
-            return -0.5, 10.0
+            # Start slightly below the minimum typical scale (1) to show mass
+            # just to the left of the mode.
+            return 0.9, 10.0
         if dist_type == "Student-t" and len(self.samples) == 0:
             # Wider window to better show heavy tails
             return -8.0, 8.0
@@ -353,6 +355,15 @@ class DistributionProbabilityVisualization51(DistributionProbabilityVisualizatio
                 y_max = 1.0
             elif dist_type == "Pareto" and dist_category == "Continuous":
                 # Fix Pareto vertical scale to match other heavy-tailed examples.
+                y_max = 5.0
+
+            # For all remaining distributions, also use fixed limits so the
+            # vertical window does not change when toggling log scale.
+            if y_max is None and dist_category == "Discrete":
+                # All discrete PMFs are between 0 and 1.
+                y_max = 1.0
+            elif y_max is None and dist_category == "Continuous":
+                # Generic continuous case: reuse the Gaussian-style window.
                 y_max = 5.0
 
             fig.update_xaxes(title_text="x")
