@@ -33,7 +33,38 @@ SURFACE_FUNCS = {
     "Original (sin/cos + saddle)": f_original,
     "Monkey saddle": f_monkey_saddle,
     "Paraboloid": f_paraboloid,
-    "Sine product": f_sine_product_n1
+    "Sine product": f_sine_product_n1,
+}
+
+# Probability / distribution-inspired surfaces for level-set demo
+def f_exp_independent(x, y):
+    """Independent Exp(1): e^{-(x + y)} for x>0,y>0, else 0."""
+    z = np.exp(-(x + y))
+    z[(x <= 0) | (y <= 0)] = 0.0
+    return z
+
+
+def f_laplace_independent(x, y):
+    """Independent Laplace: e^{-|x| - |y|} on all R^2."""
+    return np.exp(-np.abs(x) - np.abs(y))
+
+
+def f_normal_independent(x, y):
+    """Independent standard Normal (unnormalized): e^{-0.5(x^2 + y^2)}."""
+    return np.exp(-0.5 * (x * x + y * y))
+
+
+def f_student_t_bivariate(x, y):
+    """Bivariate Student‑t style surface: (1 + 0.5(x^2 + y^2))^{-2}."""
+    r2 = x * x + y * y
+    return (1.0 + 0.5 * r2) ** (-2.0)
+
+
+SURFACE_FUNCS_DISTS = {
+    "Independent Exp: e^{-(x+y)} (x>0,y>0)": f_exp_independent,
+    "Independent Laplace: e^{-|x| - |y|}": f_laplace_independent,
+    "Independent Normal: e^{-0.5(x^2+y^2)}": f_normal_independent,
+    "Student-t: (1 + 0.5(x^2+y^2))^{-2}": f_student_t_bivariate,
 }
 
 # Shared grid
@@ -367,7 +398,9 @@ class LevelSetsVisualization:
     """Visualization 2: 3D Level Sets (Clean - no tangent plane, gradients, or derivative lines)"""
     
     def __init__(self):
-        self.surface_funcs = SURFACE_FUNCS.copy()
+        # Include both the original calculus surfaces and the four
+        # probability-inspired surfaces in the dropdown.
+        self.surface_funcs = {**SURFACE_FUNCS, **SURFACE_FUNCS_DISTS}
         self.x = x
         self.y = y
         self.X = X
