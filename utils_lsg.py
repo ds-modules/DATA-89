@@ -411,6 +411,7 @@ class LevelSetsVisualization:
         self.Z_ls = self.surface_funcs[self._default_key](self.X, self.Y)
         self.zmin_ls, self.zmax_ls = float(self.Z_ls.min()), float(self.Z_ls.max())
         self._cg_ls = None
+        self._restrict_first_quadrant = False
         
         self._create_widgets()
         self._setup_callbacks()
@@ -458,9 +459,31 @@ class LevelSetsVisualization:
         
     def _update_z_stats(self):
         """Update z statistics for current surface"""
-        f = self.surface_funcs[self.surface_dropdown.value]
+        key = self.surface_dropdown.value
+        f = self.surface_funcs[key]
         self.Z_ls = f(self.X, self.Y)
-        self.zmin_ls, self.zmax_ls = float(self.Z_ls.min()), float(self.Z_ls.max())
+
+        # For the independent exponential surface, restrict display to x>=0,y>=0.
+        # Plotly treats NaNs as missing (not rendered), so this cleanly removes
+        # the other quadrants without changing the shared grid.
+        self._restrict_first_quadrant = (key == "Independent Exp: e^{-(x+y)} (x>0,y>0)")
+        if self._restrict_first_quadrant:
+            Z = np.array(self.Z_ls, dtype=float)
+            Z[(self.X < 0) | (self.Y < 0)] = np.nan
+            self.Z_ls = Z
+
+        # Use finite values for z-range computations
+        finite = np.isfinite(self.Z_ls)
+        if np.any(finite):
+            self.zmin_ls = float(np.nanmin(self.Z_ls))
+            self.zmax_ls = float(np.nanmax(self.Z_ls))
+        else:
+            self.zmin_ls, self.zmax_ls = 0.0, 1.0
+
+        # For the four probability-inspired surfaces (nonnegative), set the
+        # bottom of the z-axis to exactly 0 for consistency.
+        if key in SURFACE_FUNCS_DISTS:
+            self.zmin_ls = 0.0
         
         self.z_slider.min = self.zmin_ls
         self.z_slider.max = self.zmax_ls
@@ -578,12 +601,17 @@ class LevelSetsVisualization:
                 ))
         
         scene = dict(
-            xaxis_title="x", yaxis_title="y", zaxis_title="z",
+            xaxis_title="x",
+            yaxis_title="y",
+            zaxis_title="z",
             xaxis=dict(showspikes=False),
             yaxis=dict(showspikes=False),
-            zaxis=dict(showspikes=False),
-            aspectmode="data"
+            zaxis=dict(showspikes=False, range=[self.zmin_ls, self.zmax_ls]),
+            aspectmode="data",
         )
+        if self._restrict_first_quadrant:
+            scene["xaxis"] = dict(**scene["xaxis"], range=[0, float(self.x.max())])
+            scene["yaxis"] = dict(**scene["yaxis"], range=[0, float(self.y.max())])
         
         if birds_eye:
             fig.update_layout(
