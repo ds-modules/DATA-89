@@ -116,6 +116,16 @@ def _format_taylor_formula(order, x_star, derivs_at_x_star):
     return f"T_{order}(x) = " + " ".join(parts)
 
 
+def _ordinal_label(n):
+    if n == 1:
+        return "1st"
+    if n == 2:
+        return "2nd"
+    if n == 3:
+        return "3rd"
+    return f"{n}th"
+
+
 class TaylorSeriesVisualizer:
     def __init__(self):
         self.library = _function_library()
@@ -161,7 +171,7 @@ class TaylorSeriesVisualizer:
         for k in range(5):
             self.order_checks[k] = widgets.Checkbox(
                 value=(k == 1),
-                description=f"{k}th order",
+                description=f"{_ordinal_label(k)} order",
                 indent=False,
             )
 
@@ -286,13 +296,13 @@ class TaylorSeriesVisualizer:
             yaxis=dict(range=list(spec["plot_y"])),
             template="plotly_white",
             height=560,
-            margin=dict(r=220),
+            margin=dict(t=120),
             legend=dict(
-                orientation="v",
-                x=1.02,
-                y=1.0,
-                xanchor="left",
-                yanchor="top",
+                orientation="h",
+                x=0.5,
+                y=1.02,
+                xanchor="center",
+                yanchor="bottom",
             ),
         )
 
@@ -311,7 +321,7 @@ class TaylorSeriesVisualizer:
         if approx_lines:
             lines_html = "".join(
                 [
-                    f"<div><b>T_{order}(x)</b> at x = {x_eval:.4f}: "
+                    f"<div><b>{_ordinal_label(order)} order</b> at x = {x_eval:.4f}: "
                     f"<span style='color:#cc6600;'><b>{val:.6f}</b></span></div>"
                     for order, val in approx_lines
                 ]
