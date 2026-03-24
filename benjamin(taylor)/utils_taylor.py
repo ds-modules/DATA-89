@@ -295,6 +295,12 @@ class TaylorSeriesVisualizer:
             opacity=0.45,
         )
 
+        # Keep the plot area readable as legend entries increase.
+        legend_item_count = 1 + 2 * len(selected_orders) + 2
+        legend_rows = max(1, math.ceil(legend_item_count / 2))
+        bottom_margin = 70 + 26 * legend_rows
+        fig_height = 520 + bottom_margin
+
         fig.update_layout(
             title=dict(
                 text=f"Taylor Series Visualizer: {self.function_dropdown.value}",
@@ -308,8 +314,8 @@ class TaylorSeriesVisualizer:
             xaxis=dict(range=list(spec["domain"])),
             yaxis=dict(range=list(spec["plot_y"])),
             template="plotly_white",
-            height=560,
-            margin=dict(t=90, b=180),
+            height=fig_height,
+            margin=dict(t=90, b=bottom_margin),
             legend=dict(
                 orientation="h",
                 x=0.5,
