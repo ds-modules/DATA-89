@@ -302,13 +302,13 @@ class TaylorSeriesVisualizer:
             yaxis=dict(range=list(spec["plot_y"])),
             template="plotly_white",
             height=560,
-            margin=dict(t=185),
+            margin=dict(t=90, b=140),
             legend=dict(
                 orientation="h",
                 x=0.5,
-                y=1.16,
+                y=-0.20,
                 xanchor="center",
-                yanchor="bottom",
+                yanchor="top",
                 font=dict(size=11),
             ),
         )
