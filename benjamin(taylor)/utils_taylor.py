@@ -289,18 +289,23 @@ class TaylorSeriesVisualizer:
         )
 
         fig.update_layout(
-            title=f"Taylor Series Visualizer: {self.function_dropdown.value}",
+            title=dict(
+                text=f"Taylor Series Visualizer: {self.function_dropdown.value}",
+                y=0.94,
+                x=0.5,
+                xanchor="center",
+            ),
             xaxis_title="x",
             yaxis_title="f(x)",
             xaxis=dict(range=list(spec["domain"])),
             yaxis=dict(range=list(spec["plot_y"])),
             template="plotly_white",
             height=560,
-            margin=dict(t=120),
+            margin=dict(t=145),
             legend=dict(
                 orientation="h",
                 x=0.5,
-                y=1.02,
+                y=1.10,
                 xanchor="center",
                 yanchor="bottom",
             ),
