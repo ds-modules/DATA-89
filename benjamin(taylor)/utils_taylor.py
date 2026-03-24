@@ -113,7 +113,7 @@ def _format_taylor_formula(order, x_star, derivs_at_x_star):
             parts.append(f"{coeff:+.5f}(x - {x_star:.4f})")
         else:
             parts.append(f"{coeff:+.5f}(x - {x_star:.4f})^{k}")
-    return f"T_{order}(x) = " + " ".join(parts)
+    return f"{_ordinal_label(order)} order Taylor approximation = " + " ".join(parts)
 
 
 def _ordinal_label(n):
@@ -244,7 +244,7 @@ class TaylorSeriesVisualizer:
                     x=x_grid,
                     y=t_vals,
                     mode="lines",
-                    name=f"T_{order}(x)",
+                    name=f"{_ordinal_label(order)} order approximation",
                     line=dict(color=approx_color, width=1.6, dash=dash_styles[order]),
                     opacity=0.75,
                 )
@@ -254,9 +254,9 @@ class TaylorSeriesVisualizer:
                     x=[x_eval],
                     y=[t_at_x],
                     mode="markers",
-                    name=f"T_{order}(x) at x",
+                    name=f"{_ordinal_label(order)} order at x",
                     marker=dict(color=approx_color, size=8, symbol="diamond"),
-                    showlegend=False,
+                    showlegend=True,
                 )
             )
 
@@ -291,9 +291,10 @@ class TaylorSeriesVisualizer:
         fig.update_layout(
             title=dict(
                 text=f"Taylor Series Visualizer: {self.function_dropdown.value}",
-                y=0.94,
+                y=0.88,
                 x=0.5,
                 xanchor="center",
+                yanchor="top",
             ),
             xaxis_title="x",
             yaxis_title="f(x)",
@@ -301,13 +302,14 @@ class TaylorSeriesVisualizer:
             yaxis=dict(range=list(spec["plot_y"])),
             template="plotly_white",
             height=560,
-            margin=dict(t=145),
+            margin=dict(t=185),
             legend=dict(
                 orientation="h",
                 x=0.5,
-                y=1.10,
+                y=1.16,
                 xanchor="center",
                 yanchor="bottom",
+                font=dict(size=11),
             ),
         )
 
