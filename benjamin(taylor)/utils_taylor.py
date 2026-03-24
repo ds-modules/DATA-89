@@ -230,11 +230,18 @@ class TaylorSeriesVisualizer:
             )
         )
 
-        approx_color = "#ff7f0e"
+        order_colors = {
+            0: "#fdb366",
+            1: "#f89c47",
+            2: "#f58529",
+            3: "#e36f16",
+            4: "#cc5d10",
+        }
         dash_styles = {0: "dot", 1: "dash", 2: "dashdot", 3: "dot", 4: "dash"}
         approx_lines = []
         approx_points = []
         for order in selected_orders:
+            order_color = order_colors[order]
             t_vals = taylor_polynomial_value(x_grid, x_star, derivs_at_x_star, order)
             t_at_x = taylor_polynomial_value(x_eval, x_star, derivs_at_x_star, order)
             approx_lines.append((order, t_at_x))
@@ -245,7 +252,7 @@ class TaylorSeriesVisualizer:
                     y=t_vals,
                     mode="lines",
                     name=f"{_ordinal_label(order)} order approximation",
-                    line=dict(color=approx_color, width=1.6, dash=dash_styles[order]),
+                    line=dict(color=order_color, width=1.8, dash=dash_styles[order]),
                     opacity=0.75,
                 )
             )
@@ -255,7 +262,7 @@ class TaylorSeriesVisualizer:
                     y=[t_at_x],
                     mode="markers",
                     name=f"{_ordinal_label(order)} order at x",
-                    marker=dict(color=approx_color, size=8, symbol="diamond"),
+                    marker=dict(color=order_color, size=8, symbol="diamond"),
                     showlegend=True,
                 )
             )
@@ -267,7 +274,7 @@ class TaylorSeriesVisualizer:
                 y=[f_at_x_star],
                 mode="markers",
                 name="Expansion point x_*",
-                marker=dict(color=approx_color, size=11, symbol="circle"),
+                marker=dict(color="#f58529", size=11, symbol="circle"),
             )
         )
         fig.add_trace(
