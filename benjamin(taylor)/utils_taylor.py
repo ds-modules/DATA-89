@@ -134,6 +134,7 @@ class TaylorSeriesVisualizer:
         self.approx_box = widgets.HTML()
         self.formula_box = widgets.HTML()
         self._first_sync = True
+        self._syncing_sliders = False
 
         self._build_widgets()
         self._wire_callbacks()
@@ -151,6 +152,8 @@ class TaylorSeriesVisualizer:
 
         slider_layout = widgets.Layout(width="320px")
         slider_desc_style = {"description_width": "160px"}
+        text_layout = widgets.Layout(width="320px")
+        text_desc_style = {"description_width": "160px"}
 
         self.expand_slider = widgets.FloatSlider(
             value=0.0,
@@ -162,6 +165,16 @@ class TaylorSeriesVisualizer:
             readout_format=".2f",
             layout=slider_layout,
         )
+        self.expand_text = widgets.BoundedFloatText(
+            value=0.0,
+            min=-2.0,
+            max=2.0,
+            step=0.01,
+            description="x_*:",
+            style=text_desc_style,
+            readout_format=".2f",
+            layout=text_layout,
+        )
         self.eval_slider = widgets.FloatSlider(
             value=0.5,
             min=-2.0,
@@ -171,6 +184,16 @@ class TaylorSeriesVisualizer:
             style=slider_desc_style,
             readout_format=".2f",
             layout=slider_layout,
+        )
+        self.eval_text = widgets.BoundedFloatText(
+            value=0.5,
+            min=-2.0,
+            max=2.0,
+            step=0.01,
+            description="x:",
+            style=text_desc_style,
+            readout_format=".2f",
+            layout=text_layout,
         )
 
         self.order_checks = {}
@@ -183,10 +206,44 @@ class TaylorSeriesVisualizer:
 
     def _wire_callbacks(self):
         self.function_dropdown.observe(self._on_function_changed, names="value")
-        self.expand_slider.observe(self._on_any_changed, names="value")
-        self.eval_slider.observe(self._on_any_changed, names="value")
+        self.expand_slider.observe(self._on_expand_slider_changed, names="value")
+        self.eval_slider.observe(self._on_eval_slider_changed, names="value")
+        self.expand_text.observe(self._on_expand_text_changed, names="value")
+        self.eval_text.observe(self._on_eval_text_changed, names="value")
         for cb in self.order_checks.values():
             cb.observe(self._on_any_changed, names="value")
+
+    def _on_expand_slider_changed(self, change):
+        if self._syncing_sliders:
+            return
+        self._syncing_sliders = True
+        self.expand_text.value = change["new"]
+        self._syncing_sliders = False
+        self._update()
+
+    def _on_eval_slider_changed(self, change):
+        if self._syncing_sliders:
+            return
+        self._syncing_sliders = True
+        self.eval_text.value = change["new"]
+        self._syncing_sliders = False
+        self._update()
+
+    def _on_expand_text_changed(self, change):
+        if self._syncing_sliders:
+            return
+        self._syncing_sliders = True
+        self.expand_slider.value = change["new"]
+        self._syncing_sliders = False
+        self._update()
+
+    def _on_eval_text_changed(self, change):
+        if self._syncing_sliders:
+            return
+        self._syncing_sliders = True
+        self.eval_slider.value = change["new"]
+        self._syncing_sliders = False
+        self._update()
 
     def _on_function_changed(self, change):
         self._sync_domain_and_sliders()
@@ -200,10 +257,13 @@ class TaylorSeriesVisualizer:
         x_min, x_max = spec["domain"]
         mid = 0.5 * (x_min + x_max)
 
+        self._syncing_sliders = True
         if self._first_sync:
             # Start with both sliders centered at the same x.
             self.expand_slider.value = mid
             self.eval_slider.value = mid
+            self.expand_text.value = mid
+            self.eval_text.value = mid
             self._first_sync = False
 
         for s in [self.expand_slider, self.eval_slider]:
@@ -213,11 +273,23 @@ class TaylorSeriesVisualizer:
                 s.value = x_min
             if s.value > x_max:
                 s.value = x_max
+        for t in [self.expand_text, self.eval_text]:
+            t.min = x_min
+            t.max = x_max
+            if t.value < x_min:
+                t.value = x_min
+            if t.value > x_max:
+                t.value = x_max
 
         if not (x_min <= self.expand_slider.value <= x_max):
             self.expand_slider.value = mid
+        if not (x_min <= self.expand_text.value <= x_max):
+            self.expand_text.value = self.expand_slider.value
         if not (x_min <= self.eval_slider.value <= x_max):
             self.eval_slider.value = mid
+        if not (x_min <= self.eval_text.value <= x_max):
+            self.eval_text.value = self.eval_slider.value
+        self._syncing_sliders = False
 
     def _selected_orders(self):
         return [k for k, cb in self.order_checks.items() if cb.value]
@@ -390,7 +462,9 @@ class TaylorSeriesVisualizer:
             [
                 self.function_dropdown,
                 self.expand_slider,
+                self.expand_text,
                 self.eval_slider,
+                self.eval_text,
                 order_menu,
                 self.value_box,
                 self.approx_box,
