@@ -133,6 +133,7 @@ class TaylorSeriesVisualizer:
         self.value_box = widgets.HTML()
         self.approx_box = widgets.HTML()
         self.formula_box = widgets.HTML()
+        self._first_sync = True
 
         self._build_widgets()
         self._wire_callbacks()
@@ -148,14 +149,18 @@ class TaylorSeriesVisualizer:
             style={"description_width": "initial"},
         )
 
+        slider_layout = widgets.Layout(width="320px")
+        slider_desc_style = {"description_width": "160px"}
+
         self.expand_slider = widgets.FloatSlider(
             value=0.0,
             min=-2.0,
             max=2.0,
             step=0.01,
             description="expand about x_*",
-            style={"description_width": "initial"},
+            style=slider_desc_style,
             readout_format=".2f",
+            layout=slider_layout,
         )
         self.eval_slider = widgets.FloatSlider(
             value=0.5,
@@ -163,8 +168,9 @@ class TaylorSeriesVisualizer:
             max=2.0,
             step=0.01,
             description="evaluate at x",
-            style={"description_width": "initial"},
+            style=slider_desc_style,
             readout_format=".2f",
+            layout=slider_layout,
         )
 
         self.order_checks = {}
@@ -192,6 +198,14 @@ class TaylorSeriesVisualizer:
     def _sync_domain_and_sliders(self):
         spec = self.library[self.function_dropdown.value]
         x_min, x_max = spec["domain"]
+        mid = 0.5 * (x_min + x_max)
+
+        if self._first_sync:
+            # Start with both sliders centered at the same x.
+            self.expand_slider.value = mid
+            self.eval_slider.value = mid
+            self._first_sync = False
+
         for s in [self.expand_slider, self.eval_slider]:
             s.min = x_min
             s.max = x_max
@@ -201,9 +215,9 @@ class TaylorSeriesVisualizer:
                 s.value = x_max
 
         if not (x_min <= self.expand_slider.value <= x_max):
-            self.expand_slider.value = 0.5 * (x_min + x_max)
+            self.expand_slider.value = mid
         if not (x_min <= self.eval_slider.value <= x_max):
-            self.eval_slider.value = x_min + 0.7 * (x_max - x_min)
+            self.eval_slider.value = mid
 
     def _selected_orders(self):
         return [k for k, cb in self.order_checks.items() if cb.value]
