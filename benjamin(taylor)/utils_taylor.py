@@ -105,6 +105,9 @@ def taylor_polynomial_value(x, x_star, derivs_at_x_star, order):
 
 def _format_taylor_formula(order, x_star, derivs_at_x_star):
     parts = []
+    # When expansion is at 0, write x, x^2, … instead of (x - 0.0000), (x - 0.0000)^2, …
+    shift_zero = math.isclose(x_star, 0.0, abs_tol=1e-4)
+    xs_disp = round(x_star, 4)
     for k in range(order + 1):
         coeff = derivs_at_x_star[k] / math.factorial(k)
         c = round(coeff, 1)
@@ -112,10 +115,15 @@ def _format_taylor_formula(order, x_star, derivs_at_x_star):
             continue
         if k == 0:
             parts.append(f"{c:.1f}")
+        elif shift_zero:
+            if k == 1:
+                parts.append(f"{c:+.1f}x")
+            else:
+                parts.append(f"{c:+.1f}x^{k}")
         elif k == 1:
-            parts.append(f"{c:+.1f}(x - {x_star:.4f})")
+            parts.append(f"{c:+.1f}(x - {xs_disp:.4f})")
         else:
-            parts.append(f"{c:+.1f}(x - {x_star:.4f})^{k}")
+            parts.append(f"{c:+.1f}(x - {xs_disp:.4f})^{k}")
     if not parts:
         parts.append("0.0")
     return f"T_{order}(x) = " + " ".join(parts)
