@@ -105,15 +105,48 @@ def taylor_polynomial_value(x, x_star, derivs_at_x_star, order):
 
 def _format_taylor_formula(order, x_star, derivs_at_x_star):
     parts = []
+    x_s = round(x_star, 1)
     for k in range(order + 1):
         coeff = derivs_at_x_star[k] / math.factorial(k)
+        c = round(coeff, 1)
         if k == 0:
-            parts.append(f"{coeff:.5f}")
+            parts.append(f"{c:.1f}")
         elif k == 1:
-            parts.append(f"{coeff:+.5f}(x - {x_star:.4f})")
+            parts.append(f"{c:+.1f}(x - {x_s:.1f})")
         else:
-            parts.append(f"{coeff:+.5f}(x - {x_star:.4f})^{k}")
+            parts.append(f"{c:+.1f}(x - {x_s:.1f})^{k}")
     return f"{_ordinal_label(order)} order Taylor approximation = " + " ".join(parts)
+
+
+def _defaults_for_function(name, x_min, x_max):
+    """Default expansion point and evaluation point; eval defaults to 1 when in domain.
+    Expansion and evaluation defaults are never equal when the domain allows two distinct points.
+    """
+    mid = 0.5 * (x_min + x_max)
+    if name == "log(x)":
+        expand = 1.0
+    else:
+        expand = mid
+    expand = max(x_min, min(x_max, expand))
+
+    if x_min <= 1.0 <= x_max:
+        eval_x = 1.0
+    else:
+        eval_x = mid
+    eval_x = max(x_min, min(x_max, eval_x))
+
+    if abs(eval_x - expand) < 1e-9:
+        for delta in (0.5, -0.5, 0.25, -0.25, 1.0, -1.0, 0.1, -0.1):
+            cand = expand + delta
+            if x_min <= cand <= x_max and abs(cand - expand) > 1e-6:
+                eval_x = cand
+                break
+        else:
+            if abs(x_min - expand) > 1e-6:
+                eval_x = x_min
+            elif abs(x_max - expand) > 1e-6:
+                eval_x = x_max
+    return expand, eval_x
 
 
 def _ordinal_label(n):
@@ -133,7 +166,6 @@ class TaylorSeriesVisualizer:
         self.value_box = widgets.HTML()
         self.approx_box = widgets.HTML()
         self.formula_box = widgets.HTML()
-        self._first_sync = True
         self._syncing_sliders = False
 
         self._build_widgets()
@@ -176,7 +208,7 @@ class TaylorSeriesVisualizer:
             layout=text_layout,
         )
         self.eval_slider = widgets.FloatSlider(
-            value=0.5,
+            value=1.0,
             min=-2.0,
             max=2.0,
             step=0.01,
@@ -186,7 +218,7 @@ class TaylorSeriesVisualizer:
             layout=slider_layout,
         )
         self.eval_text = widgets.BoundedFloatText(
-            value=0.5,
+            value=1.0,
             min=-2.0,
             max=2.0,
             step=0.01,
@@ -255,40 +287,22 @@ class TaylorSeriesVisualizer:
     def _sync_domain_and_sliders(self):
         spec = self.library[self.function_dropdown.value]
         x_min, x_max = spec["domain"]
-        mid = 0.5 * (x_min + x_max)
+        name = self.function_dropdown.value
 
         self._syncing_sliders = True
-        if self._first_sync:
-            # Start with both sliders centered at the same x.
-            self.expand_slider.value = mid
-            self.eval_slider.value = mid
-            self.expand_text.value = mid
-            self.eval_text.value = mid
-            self._first_sync = False
 
         for s in [self.expand_slider, self.eval_slider]:
             s.min = x_min
             s.max = x_max
-            if s.value < x_min:
-                s.value = x_min
-            if s.value > x_max:
-                s.value = x_max
         for t in [self.expand_text, self.eval_text]:
             t.min = x_min
             t.max = x_max
-            if t.value < x_min:
-                t.value = x_min
-            if t.value > x_max:
-                t.value = x_max
 
-        if not (x_min <= self.expand_slider.value <= x_max):
-            self.expand_slider.value = mid
-        if not (x_min <= self.expand_text.value <= x_max):
-            self.expand_text.value = self.expand_slider.value
-        if not (x_min <= self.eval_slider.value <= x_max):
-            self.eval_slider.value = mid
-        if not (x_min <= self.eval_text.value <= x_max):
-            self.eval_text.value = self.eval_slider.value
+        expand_def, eval_def = _defaults_for_function(name, x_min, x_max)
+        self.expand_slider.value = expand_def
+        self.expand_text.value = expand_def
+        self.eval_slider.value = eval_def
+        self.eval_text.value = eval_def
         self._syncing_sliders = False
 
     def _selected_orders(self):
