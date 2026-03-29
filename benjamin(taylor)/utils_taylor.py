@@ -105,17 +105,20 @@ def taylor_polynomial_value(x, x_star, derivs_at_x_star, order):
 
 def _format_taylor_formula(order, x_star, derivs_at_x_star):
     parts = []
-    x_s = round(x_star, 1)
     for k in range(order + 1):
         coeff = derivs_at_x_star[k] / math.factorial(k)
         c = round(coeff, 1)
+        if abs(c) < 1e-15:
+            continue
         if k == 0:
             parts.append(f"{c:.1f}")
         elif k == 1:
-            parts.append(f"{c:+.1f}(x - {x_s:.1f})")
+            parts.append(f"{c:+.1f}(x - {x_star:.4f})")
         else:
-            parts.append(f"{c:+.1f}(x - {x_s:.1f})^{k}")
-    return f"{_ordinal_label(order)} order Taylor approximation = " + " ".join(parts)
+            parts.append(f"{c:+.1f}(x - {x_star:.4f})^{k}")
+    if not parts:
+        parts.append("0.0")
+    return f"T_{order}(x) = " + " ".join(parts)
 
 
 def _defaults_for_function(name, x_min, x_max):
@@ -166,7 +169,6 @@ class TaylorSeriesVisualizer:
         self.value_box = widgets.HTML()
         self.approx_box = widgets.HTML()
         self.formula_box = widgets.HTML()
-        self._syncing_sliders = False
 
         self._build_widgets()
         self._wire_callbacks()
@@ -184,8 +186,6 @@ class TaylorSeriesVisualizer:
 
         slider_layout = widgets.Layout(width="320px")
         slider_desc_style = {"description_width": "160px"}
-        text_layout = widgets.Layout(width="320px")
-        text_desc_style = {"description_width": "160px"}
 
         self.expand_slider = widgets.FloatSlider(
             value=0.0,
@@ -197,16 +197,6 @@ class TaylorSeriesVisualizer:
             readout_format=".2f",
             layout=slider_layout,
         )
-        self.expand_text = widgets.BoundedFloatText(
-            value=0.0,
-            min=-2.0,
-            max=2.0,
-            step=0.01,
-            description="x_*:",
-            style=text_desc_style,
-            readout_format=".2f",
-            layout=text_layout,
-        )
         self.eval_slider = widgets.FloatSlider(
             value=1.0,
             min=-2.0,
@@ -216,16 +206,6 @@ class TaylorSeriesVisualizer:
             style=slider_desc_style,
             readout_format=".2f",
             layout=slider_layout,
-        )
-        self.eval_text = widgets.BoundedFloatText(
-            value=1.0,
-            min=-2.0,
-            max=2.0,
-            step=0.01,
-            description="x:",
-            style=text_desc_style,
-            readout_format=".2f",
-            layout=text_layout,
         )
 
         self.order_checks = {}
@@ -238,44 +218,10 @@ class TaylorSeriesVisualizer:
 
     def _wire_callbacks(self):
         self.function_dropdown.observe(self._on_function_changed, names="value")
-        self.expand_slider.observe(self._on_expand_slider_changed, names="value")
-        self.eval_slider.observe(self._on_eval_slider_changed, names="value")
-        self.expand_text.observe(self._on_expand_text_changed, names="value")
-        self.eval_text.observe(self._on_eval_text_changed, names="value")
+        self.expand_slider.observe(self._on_any_changed, names="value")
+        self.eval_slider.observe(self._on_any_changed, names="value")
         for cb in self.order_checks.values():
             cb.observe(self._on_any_changed, names="value")
-
-    def _on_expand_slider_changed(self, change):
-        if self._syncing_sliders:
-            return
-        self._syncing_sliders = True
-        self.expand_text.value = change["new"]
-        self._syncing_sliders = False
-        self._update()
-
-    def _on_eval_slider_changed(self, change):
-        if self._syncing_sliders:
-            return
-        self._syncing_sliders = True
-        self.eval_text.value = change["new"]
-        self._syncing_sliders = False
-        self._update()
-
-    def _on_expand_text_changed(self, change):
-        if self._syncing_sliders:
-            return
-        self._syncing_sliders = True
-        self.expand_slider.value = change["new"]
-        self._syncing_sliders = False
-        self._update()
-
-    def _on_eval_text_changed(self, change):
-        if self._syncing_sliders:
-            return
-        self._syncing_sliders = True
-        self.eval_slider.value = change["new"]
-        self._syncing_sliders = False
-        self._update()
 
     def _on_function_changed(self, change):
         self._sync_domain_and_sliders()
@@ -289,21 +235,13 @@ class TaylorSeriesVisualizer:
         x_min, x_max = spec["domain"]
         name = self.function_dropdown.value
 
-        self._syncing_sliders = True
-
         for s in [self.expand_slider, self.eval_slider]:
             s.min = x_min
             s.max = x_max
-        for t in [self.expand_text, self.eval_text]:
-            t.min = x_min
-            t.max = x_max
 
         expand_def, eval_def = _defaults_for_function(name, x_min, x_max)
         self.expand_slider.value = expand_def
-        self.expand_text.value = expand_def
         self.eval_slider.value = eval_def
-        self.eval_text.value = eval_def
-        self._syncing_sliders = False
 
     def _selected_orders(self):
         return [k for k, cb in self.order_checks.items() if cb.value]
@@ -476,9 +414,7 @@ class TaylorSeriesVisualizer:
             [
                 self.function_dropdown,
                 self.expand_slider,
-                self.expand_text,
                 self.eval_slider,
-                self.eval_text,
                 order_menu,
                 self.value_box,
                 self.approx_box,
