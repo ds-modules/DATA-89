@@ -105,9 +105,9 @@ def taylor_polynomial_value(x, x_star, derivs_at_x_star, order):
 
 def _format_taylor_formula(order, x_star, derivs_at_x_star):
     parts = []
-    # When expansion is at 0, write x, x^2, … instead of (x - 0.0000), (x - 0.0000)^2, …
-    shift_zero = math.isclose(x_star, 0.0, abs_tol=1e-4)
-    xs_disp = round(x_star, 4)
+    # All displayed numbers (coefficients and expansion point) rounded to nearest tenth.
+    xs_disp = round(x_star, 1)
+    shift_zero = math.isclose(xs_disp, 0.0, abs_tol=1e-9)
     for k in range(order + 1):
         coeff = derivs_at_x_star[k] / math.factorial(k)
         c = round(coeff, 1)
@@ -121,9 +121,9 @@ def _format_taylor_formula(order, x_star, derivs_at_x_star):
             else:
                 parts.append(f"{c:+.1f}x^{k}")
         elif k == 1:
-            parts.append(f"{c:+.1f}(x - {xs_disp:.4f})")
+            parts.append(f"{c:+.1f}(x - {xs_disp:.1f})")
         else:
-            parts.append(f"{c:+.1f}(x - {xs_disp:.4f})^{k}")
+            parts.append(f"{c:+.1f}(x - {xs_disp:.1f})^{k}")
     if not parts:
         parts.append("0.0")
     return f"T_{order}(x) = " + " ".join(parts)
@@ -158,6 +158,16 @@ def _defaults_for_function(name, x_min, x_max):
             elif abs(x_max - expand) > 1e-6:
                 eval_x = x_max
     return expand, eval_x
+
+
+def _fmt_display_num(x, max_decimals=6):
+    """Format with at most max_decimals fractional digits, dropping unnecessary trailing zeros."""
+    s = f"{float(x):.{max_decimals}f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    if s == "-0":
+        s = "0"
+    return s
 
 
 def _ordinal_label(n):
@@ -376,19 +386,21 @@ class TaylorSeriesVisualizer:
             clear_output(wait=True)
             fig.show()
 
+        x_str = _fmt_display_num(x_eval)
+        f_str = _fmt_display_num(f_at_x)
         self.value_box.value = (
             '<div style="font-size:17px; padding:12px; background-color:#e8f4f8; '
             'border:3px solid #0066cc; border-radius:8px;">'
-            f"<b>Function value at x:</b> f({x_eval:.4f}) = "
-            f'<span style="font-size:22px; color:#0066cc;"><b>{f_at_x:.6f}</b></span>'
+            f"<b>Function value at x:</b> f({x_str}) = "
+            f'<span style="font-size:22px; color:#0066cc;"><b>{f_str}</b></span>'
             "</div>"
         )
 
         if approx_lines:
             lines_html = "".join(
                 [
-                    f"<div><b>{_ordinal_label(order)} order</b> at x = {x_eval:.4f}: "
-                    f"<span style='color:#cc6600;'><b>{val:.6f}</b></span></div>"
+                    f"<div><b>{_ordinal_label(order)} order</b> at x = {x_str}: "
+                    f"<span style='color:#cc6600;'><b>{_fmt_display_num(val)}</b></span></div>"
                     for order, val in approx_lines
                 ]
             )
