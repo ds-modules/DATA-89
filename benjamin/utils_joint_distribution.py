@@ -385,7 +385,7 @@ class JointDistributionVisualizer:
             template="plotly_white",
             autosize=True,
             height=700,
-            margin=dict(l=52, r=108, t=78, b=32),
+            margin=dict(l=100, r=108, t=78, b=100),
             updatemenus=[
                 dict(
                     type="buttons",
