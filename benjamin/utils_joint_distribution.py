@@ -148,8 +148,8 @@ class JointDistributionVisualizer:
         )
         self.mode_toggle = widgets.ToggleButtons(
             options=[
-                ("Probability (height)", "chance"),
-                ("Probability / area (height)", "density"),
+                ("P (height)", "chance"),
+                ("P / area (height)", "density"),
             ],
             description="Vertical axis",
         )
@@ -165,7 +165,15 @@ class JointDistributionVisualizer:
         self.d_slider = widgets.FloatSlider(
             value=1.0, min=0.0, max=1.0, step=0.1, description="d (Y upper)", readout_format=".2f"
         )
-        self.plot_output = widgets.Output()
+        self.plot_output = widgets.Output(
+            layout=widgets.Layout(
+                flex="1 1 0%",
+                min_width="520px",
+                width="auto",
+                overflow="visible",
+                margin="0 0 0 16px",
+            )
+        )
 
         self.delta_slider.observe(self._on_delta_change, names="value")
         for w in (
@@ -303,7 +311,14 @@ class JointDistributionVisualizer:
                     colorscale="Viridis",
                     cmin=0,
                     cmax=max(max_z, 1e-12),
-                    colorbar=dict(title=cbar_title, x=1.02),
+                    colorbar=dict(
+                        title=cbar_title,
+                        x=1.01,
+                        xanchor="left",
+                        len=0.82,
+                        y=0.5,
+                        yanchor="middle",
+                    ),
                     lighting=dict(ambient=0.65, diffuse=0.85, specular=0.4),
                     name="Selected region",
                     showlegend=False,
@@ -324,7 +339,14 @@ class JointDistributionVisualizer:
                         cmin=0,
                         cmax=max(max_z, 1e-12),
                         showscale=True,
-                        colorbar=dict(title=cbar_title, x=1.02),
+                        colorbar=dict(
+                            title=cbar_title,
+                            x=1.01,
+                            xanchor="left",
+                            len=0.82,
+                            y=0.5,
+                            yanchor="middle",
+                        ),
                         opacity=0.0,
                     ),
                     showlegend=False,
@@ -339,6 +361,18 @@ class JointDistributionVisualizer:
 
         fig = go.Figure(data=traces)
         z_max = max(max_z * 1.08, 1e-6)
+        z_center = float(0.4 * z_max)
+        # Pull camera back so the full [0,1]² footprint stays in view (reduces corner clipping).
+        cam_perspective = dict(
+            eye=dict(x=2.65, y=-2.65, z=1.75),
+            center=dict(x=0.5, y=0.5, z=z_center),
+            up=dict(x=0, y=0, z=1),
+        )
+        cam_top = dict(
+            eye=dict(x=0.0, y=0.0, z=3.85),
+            center=dict(x=0.5, y=0.5, z=0.0),
+            up=dict(x=0, y=1, z=0),
+        )
 
         fig.update_layout(
             title=dict(
@@ -347,8 +381,9 @@ class JointDistributionVisualizer:
                 xanchor="center",
             ),
             template="plotly_white",
-            height=640,
-            margin=dict(l=0, r=10, t=60, b=0),
+            autosize=True,
+            height=680,
+            margin=dict(l=8, r=96, t=56, b=8),
             updatemenus=[
                 dict(
                     type="buttons",
@@ -362,42 +397,38 @@ class JointDistributionVisualizer:
                         dict(
                             label="View from above (heatmap)",
                             method="relayout",
-                            args=[
-                                {
-                                    "scene.camera": dict(
-                                        eye=dict(x=0.0, y=0.0, z=2.65),
-                                        up=dict(x=0, y=1, z=0),
-                                        center=dict(x=0.5, y=0.5, z=0),
-                                    )
-                                }
-                            ],
+                            args=[{"scene.camera": cam_top}],
                         ),
                         dict(
                             label="3D perspective",
                             method="relayout",
-                            args=[
-                                {
-                                    "scene.camera": dict(
-                                        eye=dict(x=1.45, y=-1.45, z=0.95),
-                                        up=dict(x=0, y=0, z=1),
-                                        center=dict(x=0.5, y=0.5, z=z_max * 0.25),
-                                    )
-                                }
-                            ],
+                            args=[{"scene.camera": cam_perspective}],
                         ),
                     ],
                 )
             ],
             scene=dict(
-                xaxis=dict(title="X", range=[0, 1], showbackground=True),
-                yaxis=dict(title="Y", range=[0, 1], showbackground=True),
-                zaxis=dict(title=z_title, range=[0, z_max], showbackground=True),
-                aspectmode="manual",
-                aspectratio=dict(x=1, y=1, z=0.55 if z_max > 0 else 1),
-                camera=dict(
-                    eye=dict(x=1.45, y=-1.45, z=0.95),
-                    center=dict(x=0.5, y=0.5, z=z_max * 0.25),
+                xaxis=dict(
+                    title="X",
+                    range=[-0.05, 1.05],
+                    showbackground=True,
+                    gridcolor="rgba(0,0,0,0.12)",
                 ),
+                yaxis=dict(
+                    title="Y",
+                    range=[-0.05, 1.05],
+                    showbackground=True,
+                    gridcolor="rgba(0,0,0,0.12)",
+                ),
+                zaxis=dict(
+                    title=z_title,
+                    range=[-0.02 * z_max if z_max > 0 else 0, z_max * 1.06],
+                    showbackground=True,
+                    gridcolor="rgba(0,0,0,0.12)",
+                ),
+                aspectmode="manual",
+                aspectratio=dict(x=1, y=1, z=0.5 if z_max > 0 else 1),
+                camera=cam_perspective,
             ),
         )
 
@@ -413,7 +444,13 @@ class JointDistributionVisualizer:
         with self.plot_output:
             clear_output(wait=True)
             display(widgets.HTML(summary))
-            fig.show()
+            fig.show(
+                config={
+                    "responsive": True,
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                }
+            )
 
     def display(self):
         intro = widgets.HTML(
@@ -433,9 +470,18 @@ class JointDistributionVisualizer:
                 widgets.HBox([self.a_slider, self.b_slider]),
                 widgets.HBox([self.c_slider, self.d_slider]),
             ],
-            layout=widgets.Layout(width="460px"),
+            layout=widgets.Layout(
+                flex="0 0 auto",
+                width="440px",
+                max_width="440px",
+                min_width="280px",
+            ),
         )
-        display(widgets.HBox([controls, self.plot_output]))
+        row = widgets.HBox(
+            [controls, self.plot_output],
+            layout=widgets.Layout(width="100%", align_items="flex-start"),
+        )
+        display(row)
 
 
 def run_joint_distribution_demo():
