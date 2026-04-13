@@ -468,7 +468,7 @@ class JointDistributionVisualizer:
 
     def display(self):
         intro = widgets.HTML(
-            "<p>Bins partition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
+            "<tition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
             "Each bar height is the cell probability, or probability divided by cell area (Riemann sum for the joint density). "
             "Rotate the plot or use <b>View from above</b> to read the table as a heatmap; the colorbar matches bar height.</p>"
         )
