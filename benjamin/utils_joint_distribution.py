@@ -167,11 +167,10 @@ class JointDistributionVisualizer:
         )
         self.plot_output = widgets.Output(
             layout=widgets.Layout(
-                flex="1 1 0%",
-                min_width="520px",
-                width="auto",
+                width="100%",
+                max_width="980px",
+                min_width="480px",
                 overflow="visible",
-                margin="0 0 0 16px",
             )
         )
 
@@ -361,10 +360,11 @@ class JointDistributionVisualizer:
 
         fig = go.Figure(data=traces)
         z_max = max(max_z * 1.08, 1e-6)
-        z_center = float(0.4 * z_max)
-        # Pull camera back so the full [0,1]² footprint stays in view (reduces corner clipping).
+        z_center = float(0.45 * z_max)
+        # Perspective: lower eye z vs diagonal distance so bars read as 3D (not bird's-eye).
+        # Pull back so the full [0,1]² footprint stays in frame.
         cam_perspective = dict(
-            eye=dict(x=2.65, y=-2.65, z=1.75),
+            eye=dict(x=2.95, y=-2.95, z=1.38),
             center=dict(x=0.5, y=0.5, z=z_center),
             up=dict(x=0, y=0, z=1),
         )
@@ -379,18 +379,20 @@ class JointDistributionVisualizer:
                 text="Joint distribution on [0,1]² (independent Beta marginals)",
                 x=0.5,
                 xanchor="center",
+                y=0.97,
+                yanchor="top",
             ),
             template="plotly_white",
             autosize=True,
-            height=680,
-            margin=dict(l=8, r=96, t=56, b=8),
+            height=700,
+            margin=dict(l=52, r=108, t=78, b=32),
             updatemenus=[
                 dict(
                     type="buttons",
                     direction="left",
-                    x=0.02,
-                    y=1.02,
-                    xanchor="left",
+                    x=0.5,
+                    y=1.005,
+                    xanchor="center",
                     yanchor="bottom",
                     showactive=False,
                     buttons=[
@@ -408,6 +410,7 @@ class JointDistributionVisualizer:
                 )
             ],
             scene=dict(
+                domain=dict(x=[0.07, 0.88], y=[0.10, 0.90]),
                 xaxis=dict(
                     title="X",
                     range=[-0.05, 1.05],
@@ -427,7 +430,8 @@ class JointDistributionVisualizer:
                     gridcolor="rgba(0,0,0,0.12)",
                 ),
                 aspectmode="manual",
-                aspectratio=dict(x=1, y=1, z=0.5 if z_max > 0 else 1),
+                # Larger z ratio so bar heights are visible in perspective (was too flat).
+                aspectratio=dict(x=1, y=1, z=0.95 if z_max > 0 else 1),
                 camera=cam_perspective,
             ),
         )
@@ -444,6 +448,13 @@ class JointDistributionVisualizer:
         with self.plot_output:
             clear_output(wait=True)
             display(widgets.HTML(summary))
+            display(
+                widgets.HTML(
+                    "<style>"
+                    ".plotly-graph-div { margin-left: auto !important; margin-right: auto !important; }"
+                    "</style>"
+                )
+            )
             fig.show(
                 config={
                     "responsive": True,
@@ -477,8 +488,18 @@ class JointDistributionVisualizer:
                 min_width="280px",
             ),
         )
+        plot_col = widgets.VBox(
+            [self.plot_output],
+            layout=widgets.Layout(
+                flex="1 1 0%",
+                min_width="500px",
+                width="auto",
+                align_items="center",
+                padding="0 8px 0 16px",
+            ),
+        )
         row = widgets.HBox(
-            [controls, self.plot_output],
+            [controls, plot_col],
             layout=widgets.Layout(width="100%", align_items="flex-start"),
         )
         display(row)
