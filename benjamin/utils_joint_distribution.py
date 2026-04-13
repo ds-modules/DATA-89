@@ -312,9 +312,10 @@ class JointDistributionVisualizer:
                     cmax=max(max_z, 1e-12),
                     colorbar=dict(
                         title=cbar_title,
-                        x=1.01,
+                        x=1.02,
                         xanchor="left",
-                        len=0.82,
+                        xpad=28,
+                        len=0.78,
                         y=0.5,
                         yanchor="middle",
                     ),
@@ -340,9 +341,10 @@ class JointDistributionVisualizer:
                         showscale=True,
                         colorbar=dict(
                             title=cbar_title,
-                            x=1.01,
+                            x=1.02,
                             xanchor="left",
-                            len=0.82,
+                            xpad=28,
+                            len=0.78,
                             y=0.5,
                             yanchor="middle",
                         ),
@@ -385,7 +387,7 @@ class JointDistributionVisualizer:
             template="plotly_white",
             autosize=True,
             height=700,
-            margin=dict(l=100, r=108, t=78, b=100),
+            margin=dict(l=150, r=160, t=78, b=150),
             updatemenus=[
                 dict(
                     type="buttons",
@@ -410,7 +412,8 @@ class JointDistributionVisualizer:
                 )
             ],
             scene=dict(
-                domain=dict(x=[0.07, 0.88], y=[0.10, 0.90]),
+                # Slightly narrower x-domain so the 3D scene sits left of the colorbar with more gap.
+                domain=dict(x=[0.07, 0.84], y=[0.10, 0.90]),
                 xaxis=dict(
                     title="X",
                     range=[-0.05, 1.05],
