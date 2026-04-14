@@ -165,23 +165,6 @@ class JointDistributionVisualizer:
         self.d_slider = widgets.FloatSlider(
             value=1.0, min=0.0, max=1.0, step=0.1, description="d (Y upper)", readout_format=".2f"
         )
-        self.summary_box = widgets.HTML()
-        self.fig = go.FigureWidget()
-        self._did_set_initial_camera = False
-        self._last_camera = None
-
-        def _on_relayout(change, _self=self):
-            # Keep track of the *current* camera whenever the user rotates/zooms
-            # or whenever the view buttons set a new camera.
-            try:
-                keys = change or {}
-                if any(str(k).startswith("scene.camera") for k in keys.keys()):
-                    _self._last_camera = _self.fig.layout.scene.camera.to_plotly_json()
-            except Exception:
-                # If we can't parse camera (e.g., during figure init), just skip.
-                return
-
-        self.fig.on_relayout(_on_relayout)
         self.plot_output = widgets.Output(
             layout=widgets.Layout(
                 width="100%",
@@ -329,13 +312,11 @@ class JointDistributionVisualizer:
                     cmax=max(max_z, 1e-12),
                     colorbar=dict(
                         title=cbar_title,
-                        x=1.02,
+                        x=1.01,
                         xanchor="left",
-                        xpad=28,
-                        len=0.78,
+                        len=0.82,
                         y=0.5,
                         yanchor="middle",
-                        thickness=18,
                     ),
                     lighting=dict(ambient=0.65, diffuse=0.85, specular=0.4),
                     name="Selected region",
@@ -359,13 +340,11 @@ class JointDistributionVisualizer:
                         showscale=True,
                         colorbar=dict(
                             title=cbar_title,
-                            x=1.02,
+                            x=1.01,
                             xanchor="left",
-                            xpad=28,
-                            len=0.78,
+                            len=0.82,
                             y=0.5,
                             yanchor="middle",
-                            thickness=18,
                         ),
                         opacity=0.0,
                     ),
@@ -379,6 +358,7 @@ class JointDistributionVisualizer:
                 go.Scatter3d(x=[0], y=[0], z=[0], mode="markers", marker=dict(size=2, opacity=0))
             )
 
+        fig = go.Figure(data=traces)
         z_max = max(max_z * 1.08, 1e-6)
         z_center = float(0.45 * z_max)
         # Perspective: lower eye z vs diagonal distance so bars read as 3D (not bird's-eye).
@@ -394,7 +374,7 @@ class JointDistributionVisualizer:
             up=dict(x=0, y=1, z=0),
         )
 
-        layout_update = dict(
+        fig.update_layout(
             title=dict(
                 text="Joint distribution on [0,1]² (independent Beta marginals)",
                 x=0.5,
@@ -405,7 +385,7 @@ class JointDistributionVisualizer:
             template="plotly_white",
             autosize=True,
             height=700,
-            margin=dict(l=150, r=160, t=78, b=150),
+            margin=dict(l=100, r=108, t=78, b=100),
             updatemenus=[
                 dict(
                     type="buttons",
@@ -430,8 +410,7 @@ class JointDistributionVisualizer:
                 )
             ],
             scene=dict(
-                # Slightly narrower x-domain so the 3D scene sits left of the colorbar with more gap.
-                domain=dict(x=[0.07, 0.84], y=[0.10, 0.90]),
+                domain=dict(x=[0.07, 0.88], y=[0.10, 0.90]),
                 xaxis=dict(
                     title="X",
                     range=[-0.05, 1.05],
@@ -455,8 +434,6 @@ class JointDistributionVisualizer:
                 aspectratio=dict(x=1, y=1, z=0.95 if z_max > 0 else 1),
                 camera=cam_perspective,
             ),
-            # Keep the user's current rotation/zoom when sliders change.
-            uirevision="joint_dist_v1",
         )
 
         summary = (
@@ -467,29 +444,6 @@ class JointDistributionVisualizer:
             f"<span style='color:#555'>Sliders a, b, c, d are multiples of Δ = {delta:.4f}. "
             f"Max cell probability ≈ {max_prob:.5f}.</span>"
         )
-
-        self.summary_box.value = summary
-
-        # Update the existing FigureWidget so the camera angle stays where the student left it.
-        camera_to_keep = self._last_camera
-        if camera_to_keep is None:
-            try:
-                camera_to_keep = self.fig.layout.scene.camera.to_plotly_json()
-            except Exception:
-                camera_to_keep = None
-
-        with self.fig.batch_update():
-            # Replacing `data` can reset view in some notebook frontends; we reapply the camera after.
-            self.fig.data = traces
-            self.fig.layout.update(layout_update)
-            if not self._did_set_initial_camera:
-                self.fig.layout.scene.camera = cam_perspective
-                self._did_set_initial_camera = True
-
-            # Always restore the user's last camera (also preserves heatmap vs 3D perspective).
-            if camera_to_keep is not None:
-                self.fig.layout.scene.camera = camera_to_keep
-                self._last_camera = camera_to_keep
 
         with self.plot_output:
             clear_output(wait=True)
@@ -511,7 +465,7 @@ class JointDistributionVisualizer:
 
     def display(self):
         intro = widgets.HTML(
-            "<tition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
+            "<p>Bins partition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
             "Each bar height is the cell probability, or probability divided by cell area (Riemann sum for the joint density). "
             "Rotate the plot or use <b>View from above</b> to read the table as a heatmap; the colorbar matches bar height.</p>"
         )
