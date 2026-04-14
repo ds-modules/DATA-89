@@ -1,511 +1,596 @@
 """
-Joint distribution table → 3D histogram for independent Beta(α,β) marginals on [0,1]².
-Used by joint_distribution_demo.ipynb.
+Joint Distribution Table to Surface Visualizer
+
+Visualizes joint distribution of two independent beta-distributed random variables
+over [0,1]×[0,1] as a 3D histogram with interactive controls.
 """
 
-from __future__ import annotations
-
 import numpy as np
-import ipywidgets as widgets
 import plotly.graph_objects as go
-from IPython.display import clear_output, display
-from scipy import stats
-
-
-def _bin_edges_unit_interval(delta: float) -> np.ndarray:
-    """Edges 0 = e0 < e1 < … < eN = 1 with each step at most delta (last bin may be shorter)."""
-    delta = float(delta)
-    if delta <= 0:
-        raise ValueError("delta must be positive")
-    edges = [0.0]
-    while edges[-1] < 1.0 - 1e-15:
-        edges.append(min(1.0, edges[-1] + delta))
-    return np.array(edges, dtype=float)
-
-
-def _snap_to_grid(v: float, delta: float) -> float:
-    delta = float(delta)
-    if delta <= 0:
-        return 0.0
-    k = int(round(v / delta))
-    return float(np.clip(k * delta, 0.0, 1.0))
-
-
-def _cell_prob_independent_beta(
-    x_lo: float,
-    x_hi: float,
-    y_lo: float,
-    y_hi: float,
-    dist_x: stats.rv_continuous,
-    dist_y: stats.rv_continuous,
-) -> float:
-    px = dist_x.cdf(x_hi) - dist_x.cdf(x_lo)
-    py = dist_y.cdf(y_hi) - dist_y.cdf(y_lo)
-    return float(px * py)
-
-
-def _rectangle_prob(dist_x: stats.rv_continuous, dist_y: stats.rv_continuous, a, b, c, d) -> float:
-    return float((dist_x.cdf(b) - dist_x.cdf(a)) * (dist_y.cdf(d) - dist_y.cdf(c)))
-
-
-def _append_box_mesh(
-    vertices: list,
-    i_list: list,
-    j_list: list,
-    k_list: list,
-    x0: float,
-    x1: float,
-    y0: float,
-    y1: float,
-    z0: float,
-    z1: float,
-) -> None:
-    b = len(vertices)
-    vertices.extend(
-        [
-            [x0, y0, z0],
-            [x1, y0, z0],
-            [x1, y1, z0],
-            [x0, y1, z0],
-            [x0, y0, z1],
-            [x1, y0, z1],
-            [x1, y1, z1],
-            [x0, y1, z1],
-        ]
-    )
-    faces = [
-        (b + 0, b + 1, b + 2),
-        (b + 0, b + 2, b + 3),
-        (b + 4, b + 5, b + 6),
-        (b + 4, b + 6, b + 7),
-        (b + 0, b + 1, b + 5),
-        (b + 0, b + 5, b + 4),
-        (b + 1, b + 2, b + 6),
-        (b + 1, b + 6, b + 5),
-        (b + 2, b + 3, b + 7),
-        (b + 2, b + 7, b + 6),
-        (b + 3, b + 0, b + 4),
-        (b + 3, b + 4, b + 7),
-    ]
-    for i, j, k in faces:
-        i_list.append(i)
-        j_list.append(j)
-        k_list.append(k)
-
-
-def _build_batched_mesh3d(
-    cells: list[tuple[float, float, float, float, float, float]],
-) -> tuple[list, list, list, list, list, list, list] | None:
-    """
-    cells: list of (x0, x1, y0, y1, prob, z_height) — z_height already set per mode.
-    Returns (x, y, z, i, j, k, intensity) for Mesh3d, or None if empty.
-    """
-    if not cells:
-        return None
-
-    vertices: list = []
-    i_list: list[int] = []
-    j_list: list[int] = []
-    k_list: list[int] = []
-    intensity: list[float] = []
-
-    for x0, x1, y0, y1, prob, z_top in cells:
-        z0 = 0.0
-        _append_box_mesh(vertices, i_list, j_list, k_list, x0, x1, y0, y1, z0, z_top)
-        # Color by bar height (same on all 8 vertices of the box)
-        h = float(z_top)
-        intensity.extend([h] * 8)
-
-    xs = [v[0] for v in vertices]
-    ys = [v[1] for v in vertices]
-    zs = [v[2] for v in vertices]
-
-    return xs, ys, zs, i_list, j_list, k_list, intensity
+from scipy.special import beta as beta_function
+import ipywidgets as widgets
+from IPython.display import display, HTML, clear_output
+from functools import lru_cache
+import warnings
+warnings.filterwarnings('ignore')
 
 
 class JointDistributionVisualizer:
+    """Interactive visualizer for joint distributions."""
+    
     def __init__(self):
-        self.delta_slider = widgets.FloatSlider(
-            value=0.1,
-            min=0.02,
-            max=0.25,
-            step=0.01,
-            continuous_update=False,
-            description="Δx = Δy",
-            readout_format=".2f",
+        self.delta_x = 0.1
+        self.alpha_x = 2.0
+        self.beta_x = 2.0
+        self.alpha_y = 2.0
+        self.beta_y = 2.0
+        self.normalize_by_area = False
+        self.a = 0.0
+        self.b = 1.0
+        self.c = 0.0
+        self.d = 1.0
+        self.current_fig = None
+        self.view_mode = "3D perspective"  # "3D perspective", "Birds-eye", or "Heatmap"
+        self.output_widget = widgets.Output()
+        # Keep a consistent light gradient across heatmap + 3D views.
+        # Plotly named scales: https://plotly.com/python/builtin-colorscales/
+        self.colorscale = "YlGnBu"
+        
+    def beta_pdf(self, x, alpha, beta):
+        """Evaluate beta PDF at x."""
+        # Handle boundary cases
+        x = np.clip(x, 1e-10, 1 - 1e-10)
+        return (x**(alpha-1) * (1-x)**(beta-1)) / beta_function(alpha, beta)
+    
+    def compute_probabilities(self):
+        """Compute joint probability table."""
+        n_bins = int(1.0 / self.delta_x)
+        probs = np.zeros((n_bins, n_bins))
+        
+        for i in range(n_bins):
+            for j in range(n_bins):
+                # Bin edges
+                x_low = i * self.delta_x
+                x_high = (i + 1) * self.delta_x
+                y_low = j * self.delta_x
+                y_high = (j + 1) * self.delta_x
+                
+                # Midpoints for evaluation (approximate via midpoint rule)
+                x_mid = (x_low + x_high) / 2
+                y_mid = (y_low + y_high) / 2
+                
+                # Probability ≈ pdf(x_mid) * pdf(y_mid) * delta_x^2
+                px = self.beta_pdf(x_mid, self.alpha_x, self.beta_x)
+                py = self.beta_pdf(y_mid, self.alpha_y, self.beta_y)
+                
+                prob = px * py * (self.delta_x ** 2)
+                probs[i, j] = prob
+        
+        # Normalize to ensure sum ≈ 1
+        probs = probs / np.sum(probs)
+        
+        return probs
+    
+    def get_bar_heights(self, probs):
+        """Get bar heights (normalized by area if needed)."""
+        if self.normalize_by_area:
+            # probability / area = probability / delta_x^2
+            heights = probs / (self.delta_x ** 2)
+        else:
+            heights = probs
+        return heights
+    
+    def snap_to_grid(self, value):
+        """Snap value to nearest multiple of delta_x."""
+        return round(value / self.delta_x) * self.delta_x
+    
+    def compute_interval_probability(self, probs):
+        """Compute probability of X in [a,b], Y in [c,d]."""
+        a_snapped = self.snap_to_grid(self.a)
+        b_snapped = self.snap_to_grid(self.b)
+        c_snapped = self.snap_to_grid(self.c)
+        d_snapped = self.snap_to_grid(self.d)
+        
+        # Ensure valid interval
+        if a_snapped >= b_snapped:
+            b_snapped = a_snapped + self.delta_x
+        if c_snapped >= d_snapped:
+            d_snapped = c_snapped + self.delta_x
+        
+        i_min = int(np.round(a_snapped / self.delta_x))
+        i_max = int(np.round(b_snapped / self.delta_x))
+        j_min = int(np.round(c_snapped / self.delta_x))
+        j_max = int(np.round(d_snapped / self.delta_x))
+        
+        # Clamp to valid range
+        n_bins = probs.shape[0]
+        i_min = max(0, min(i_min, n_bins - 1))
+        i_max = max(0, min(i_max, n_bins))
+        j_min = max(0, min(j_min, n_bins - 1))
+        j_max = max(0, min(j_max, n_bins))
+        
+        prob = np.sum(probs[i_min:i_max, j_min:j_max])
+        
+        return prob, (i_min, i_max, j_min, j_max), (a_snapped, b_snapped, c_snapped, d_snapped)
+    
+    def create_heatmap_figure(self, probs):
+        """Create 2D heatmap view."""
+        n_bins = probs.shape[0]
+        heights = self.get_bar_heights(probs)
+        zmax = float(np.max(heights)) if np.size(heights) else 1.0
+        if zmax <= 0:
+            zmax = 1.0
+        
+        # Compute interval and highlighting
+        prob_interval, (i_min, i_max, j_min, j_max), snapped = self.compute_interval_probability(probs)
+        
+        # Create mask for highlighted cells
+        mask = np.zeros_like(heights)
+        mask[i_min:i_max, j_min:j_max] = 1
+        
+        # Create bins for axis labels
+        bin_edges = np.arange(0, 1 + self.delta_x, self.delta_x)
+        bin_centers = bin_edges[:-1] + self.delta_x / 2
+        
+        fig = go.Figure()
+        
+        # Add heatmap
+        fig.add_trace(go.Heatmap(
+            x=bin_centers,
+            y=bin_centers,
+            z=heights,
+            colorscale=self.colorscale,
+            zmin=0.0,
+            zmax=zmax,
+            colorbar=dict(title="Probability" if not self.normalize_by_area else "Prob/Area"),
+            hovertemplate="X: %{x:.3f}<br>Y: %{y:.3f}<br>Value: %{z:.6f}<extra></extra>"
+        ))
+        
+        # Add rectangle showing selected region
+        a_snapped, b_snapped, c_snapped, d_snapped = snapped
+        fig.add_shape(
+            type="rect",
+            x0=a_snapped, x1=b_snapped,
+            y0=c_snapped, y1=d_snapped,
+            line=dict(color="red", width=3),
+            fillcolor=None,
+            name="Selected region"
         )
-        self.ax_slider = widgets.FloatSlider(
-            value=2.0, min=0.3, max=8.0, step=0.1, description="α for X", readout_format=".1f"
-        )
-        self.bx_slider = widgets.FloatSlider(
-            value=2.0, min=0.3, max=8.0, step=0.1, description="β for X", readout_format=".1f"
-        )
-        self.ay_slider = widgets.FloatSlider(
-            value=2.0, min=0.3, max=8.0, step=0.1, description="α for Y", readout_format=".1f"
-        )
-        self.by_slider = widgets.FloatSlider(
-            value=2.0, min=0.3, max=8.0, step=0.1, description="β for Y", readout_format=".1f"
-        )
-        self.mode_toggle = widgets.ToggleButtons(
-            options=[
-                ("P (height)", "chance"),
-                ("P / area (height)", "density"),
-            ],
-            description="Vertical axis",
-        )
-        self.a_slider = widgets.FloatSlider(
-            value=0.0, min=0.0, max=1.0, step=0.1, description="a (X lower)", readout_format=".2f"
-        )
-        self.b_slider = widgets.FloatSlider(
-            value=1.0, min=0.0, max=1.0, step=0.1, description="b (X upper)", readout_format=".2f"
-        )
-        self.c_slider = widgets.FloatSlider(
-            value=0.0, min=0.0, max=1.0, step=0.1, description="c (Y lower)", readout_format=".2f"
-        )
-        self.d_slider = widgets.FloatSlider(
-            value=1.0, min=0.0, max=1.0, step=0.1, description="d (Y upper)", readout_format=".2f"
-        )
-        self.plot_output = widgets.Output(
-            layout=widgets.Layout(
-                width="100%",
-                max_width="980px",
-                min_width="480px",
-                overflow="visible",
-            )
-        )
-
-        self.delta_slider.observe(self._on_delta_change, names="value")
-        for w in (
-            self.ax_slider,
-            self.bx_slider,
-            self.ay_slider,
-            self.by_slider,
-            self.mode_toggle,
-            self.a_slider,
-            self.b_slider,
-            self.c_slider,
-            self.d_slider,
-        ):
-            w.observe(self._redraw, names="value")
-
-        self._on_delta_change({"owner": self.delta_slider, "new": self.delta_slider.value})
-
-    def _on_delta_change(self, change):
-        d = float(change["new"])
-        d = max(0.02, min(0.25, d))
-        for s in (self.a_slider, self.b_slider, self.c_slider, self.d_slider):
-            s.step = d
-            s.min = 0.0
-            s.max = 1.0
-            s.value = _snap_to_grid(float(s.value), d)
-        self._enforce_order()
-        self._redraw()
-
-    def _enforce_order(self):
-        d = float(self.delta_slider.value)
-        a = _snap_to_grid(float(self.a_slider.value), d)
-        b = _snap_to_grid(float(self.b_slider.value), d)
-        c = _snap_to_grid(float(self.c_slider.value), d)
-        dd = _snap_to_grid(float(self.d_slider.value), d)
-        if a > b:
-            a, b = b, a
-        if c > dd:
-            c, dd = dd, c
-        self.a_slider.unobserve(self._redraw, names="value")
-        self.b_slider.unobserve(self._redraw, names="value")
-        self.c_slider.unobserve(self._redraw, names="value")
-        self.d_slider.unobserve(self._redraw, names="value")
-        self.a_slider.value = a
-        self.b_slider.value = b
-        self.c_slider.value = c
-        self.d_slider.value = dd
-        self.a_slider.observe(self._redraw, names="value")
-        self.b_slider.observe(self._redraw, names="value")
-        self.c_slider.observe(self._redraw, names="value")
-        self.d_slider.observe(self._redraw, names="value")
-
-    def _redraw(self, *_):
-        self._enforce_order()
-        delta = float(self.delta_slider.value)
-        a = float(self.a_slider.value)
-        b = float(self.b_slider.value)
-        c = float(self.c_slider.value)
-        d = float(self.d_slider.value)
-
-        dist_x = stats.beta(self.ax_slider.value, self.bx_slider.value)
-        dist_y = stats.beta(self.ay_slider.value, self.by_slider.value)
-
-        edges = _bin_edges_unit_interval(delta)
-        nx = len(edges) - 1
-        mode = self.mode_toggle.value
-
-        inside_cells: list[tuple[float, float, float, float, float, float]] = []
-        outside_cells: list[tuple[float, float, float, float, float, float]] = []
-
-        max_z = 0.0
-        max_prob = 0.0
-
-        for i in range(nx):
-            x0, x1 = edges[i], edges[i + 1]
-            for j in range(nx):
-                y0, y1 = edges[j], edges[j + 1]
-                prob = _cell_prob_independent_beta(x0, x1, y0, y1, dist_x, dist_y)
-                area = max((x1 - x0) * (y1 - y0), 1e-15)
-                if mode == "chance":
-                    z_top = prob
-                else:
-                    z_top = prob / area
-                max_z = max(max_z, z_top)
-                max_prob = max(max_prob, prob)
-
-                inside = (x0 >= a - 1e-12) and (x1 <= b + 1e-12) and (y0 >= c - 1e-12) and (y1 <= d + 1e-12)
-                tup = (x0, x1, y0, y1, prob, z_top)
-                if inside:
-                    inside_cells.append(tup)
-                else:
-                    outside_cells.append(tup)
-
-        prob_rect = _rectangle_prob(dist_x, dist_y, a, b, c, d)
-
-        traces = []
-        z_title = (
-            "Height = P(cell)" if mode == "chance" else "Height = P(cell) / (cell area)"
-        )
-        cbar_title = "Bar height" if mode == "chance" else "Bar height (prob / area)"
-
-        inside_mesh = _build_batched_mesh3d(inside_cells)
-        outside_mesh = _build_batched_mesh3d(outside_cells)
-
-        if outside_mesh is not None:
-            xs, ys, zs, ii, jj, kk, _ = outside_mesh
-            n = len(xs)
-            grey_rgb = "rgb(150,150,150)"
-            traces.append(
-                go.Mesh3d(
-                    x=xs,
-                    y=ys,
-                    z=zs,
-                    i=ii,
-                    j=jj,
-                    k=kk,
-                    vertexcolor=[grey_rgb] * n,
-                    name="Outside selection",
-                    showlegend=False,
-                    opacity=0.38,
-                    lighting=dict(ambient=0.9, diffuse=0.5, specular=0.1),
-                )
-            )
-
-        if inside_mesh is not None:
-            xs, ys, zs, ii, jj, kk, intensity = inside_mesh
-            traces.append(
-                go.Mesh3d(
-                    x=xs,
-                    y=ys,
-                    z=zs,
-                    i=ii,
-                    j=jj,
-                    k=kk,
-                    intensity=intensity,
-                    colorscale="Viridis",
-                    cmin=0,
-                    cmax=max(max_z, 1e-12),
-                    colorbar=dict(
-                        title=cbar_title,
-                        x=1.01,
-                        xanchor="left",
-                        len=0.82,
-                        y=0.5,
-                        yanchor="middle",
-                    ),
-                    lighting=dict(ambient=0.65, diffuse=0.85, specular=0.4),
-                    name="Selected region",
-                    showlegend=False,
-                )
-            )
-
-        if inside_mesh is None and outside_mesh is not None:
-            traces.append(
-                go.Scatter3d(
-                    x=[0.5],
-                    y=[0.5],
-                    z=[0.0],
-                    mode="markers",
-                    marker=dict(
-                        size=6,
-                        color=[max_z],
-                        colorscale="Viridis",
-                        cmin=0,
-                        cmax=max(max_z, 1e-12),
-                        showscale=True,
-                        colorbar=dict(
-                            title=cbar_title,
-                            x=1.01,
-                            xanchor="left",
-                            len=0.82,
-                            y=0.5,
-                            yanchor="middle",
-                        ),
-                        opacity=0.0,
-                    ),
-                    showlegend=False,
-                    hoverinfo="skip",
-                )
-            )
-
-        if not traces:
-            traces.append(
-                go.Scatter3d(x=[0], y=[0], z=[0], mode="markers", marker=dict(size=2, opacity=0))
-            )
-
-        fig = go.Figure(data=traces)
-        z_max = max(max_z * 1.08, 1e-6)
-        z_center = float(0.45 * z_max)
-        # Perspective: lower eye z vs diagonal distance so bars read as 3D (not bird's-eye).
-        # Pull back so the full [0,1]² footprint stays in frame.
-        cam_perspective = dict(
-            eye=dict(x=2.95, y=-2.95, z=1.38),
-            center=dict(x=0.5, y=0.5, z=z_center),
-            up=dict(x=0, y=0, z=1),
-        )
-        cam_top = dict(
-            eye=dict(x=0.0, y=0.0, z=3.85),
-            center=dict(x=0.5, y=0.5, z=0.0),
-            up=dict(x=0, y=1, z=0),
-        )
-
+        
         fig.update_layout(
             title=dict(
-                text="Joint distribution on [0,1]² (independent Beta marginals)",
+                text=f"Heatmap View: P(X∈[{a_snapped:.2f},{b_snapped:.2f}], Y∈[{c_snapped:.2f},{d_snapped:.2f}]) = {prob_interval:.6f}",
                 x=0.5,
-                xanchor="center",
-                y=0.97,
-                yanchor="top",
+                xanchor='center',
+                font=dict(size=14)
             ),
-            template="plotly_white",
-            autosize=True,
+            xaxis_title="X",
+            yaxis_title="Y",
+            width=800,
             height=700,
-            margin=dict(l=100, r=108, t=78, b=100),
-            updatemenus=[
-                dict(
-                    type="buttons",
-                    direction="left",
-                    x=0.5,
-                    y=1.005,
-                    xanchor="center",
-                    yanchor="bottom",
-                    showactive=False,
-                    buttons=[
-                        dict(
-                            label="View from above (heatmap)",
-                            method="relayout",
-                            args=[{"scene.camera": cam_top}],
-                        ),
-                        dict(
-                            label="3D perspective",
-                            method="relayout",
-                            args=[{"scene.camera": cam_perspective}],
-                        ),
-                    ],
+            yaxis=dict(scaleanchor="x", scaleratio=1)
+        )
+        
+        return fig, prob_interval
+    
+
+    def create_figure(self, probs, birds_eye=False):
+        """Create 3D histogram figure with interactivity - optimized with Mesh3d."""
+        n_bins = probs.shape[0]
+        heights = self.get_bar_heights(probs)
+        zmax = float(np.max(heights)) if np.size(heights) else 1.0
+        if zmax <= 0:
+            zmax = 1.0
+        
+        # Compute interval and highlighting
+        prob_interval, (i_min, i_max, j_min, j_max), snapped = self.compute_interval_probability(probs)
+        
+        fig = go.Figure()
+        
+        # Build mesh data for all bars - much more efficient than individual traces
+        # Make bars look more "natural": less gap + better lighting, less transparency.
+        bar_size = self.delta_x * 0.94
+        
+        # Collect vertices/faces separately for inside vs outside so we can
+        # grey+fade the outside region while keeping the SAME colorscale.
+        inside_vx, inside_vy, inside_vz, inside_intensity = [], [], [], []
+        inside_fi, inside_fj, inside_fk = [], [], []
+        outside_vx, outside_vy, outside_vz = [], [], []
+        outside_fi, outside_fj, outside_fk = [], [], []
+        inside_vertex_idx = 0
+        outside_vertex_idx = 0
+        
+        hover_x = []
+        hover_y = []
+        hover_z = []
+        hover_text = []
+
+        def append_box(target: str, x_center: float, y_center: float, height: float) -> None:
+            nonlocal inside_vertex_idx, outside_vertex_idx
+            x_off = bar_size / 2
+            y_off = bar_size / 2
+
+            box_x = [
+                x_center - x_off, x_center + x_off, x_center + x_off, x_center - x_off,
+                x_center - x_off, x_center + x_off, x_center + x_off, x_center - x_off,
+            ]
+            box_y = [
+                y_center - y_off, y_center - y_off, y_center + y_off, y_center + y_off,
+                y_center - y_off, y_center - y_off, y_center + y_off, y_center + y_off,
+            ]
+            box_z = [0.0, 0.0, 0.0, 0.0, height, height, height, height]
+
+            if target == "inside":
+                base = inside_vertex_idx
+                inside_vx.extend(box_x); inside_vy.extend(box_y); inside_vz.extend(box_z)
+                inside_intensity.extend([float(height)] * 8)
+                fi, fj, fk = inside_fi, inside_fj, inside_fk
+                inside_vertex_idx += 8
+            else:
+                base = outside_vertex_idx
+                outside_vx.extend(box_x); outside_vy.extend(box_y); outside_vz.extend(box_z)
+                fi, fj, fk = outside_fi, outside_fj, outside_fk
+                outside_vertex_idx += 8
+
+            # 12 triangles (top, bottom, 4 sides) like a solid box
+            fi.extend([base+0, base+0, base+4, base+4, base+0, base+0, base+1, base+1, base+2, base+2, base+3, base+3])
+            fj.extend([base+1, base+2, base+5, base+6, base+1, base+5, base+2, base+6, base+3, base+7, base+0, base+4])
+            fk.extend([base+2, base+3, base+6, base+7, base+5, base+4, base+6, base+5, base+7, base+6, base+4, base+7])
+
+        for i in range(n_bins):
+            for j in range(n_bins):
+                x_center = i * self.delta_x + self.delta_x/2
+                y_center = j * self.delta_x + self.delta_x/2
+                height = heights[i, j]
+                
+                in_rectangle = (i_min <= i < i_max) and (j_min <= j < j_max)
+
+                append_box("inside" if in_rectangle else "outside", x_center, y_center, float(height))
+
+                # Add a hoverable point at the top center of the bar.
+                # Mesh3d hover is limited; this gives students exact (x,y,height) readouts.
+                hover_x.append(x_center)
+                hover_y.append(y_center)
+                hover_z.append(float(height))
+                hover_text.append(
+                    f"x={x_center:.3f}<br>y={y_center:.3f}<br>height={float(height):.6g}"
                 )
-            ],
+        
+        # Outside region: grey + faded (no colorscale)
+        if outside_vx:
+            fig.add_trace(
+                go.Mesh3d(
+                    x=outside_vx,
+                    y=outside_vy,
+                    z=outside_vz,
+                    i=outside_fi,
+                    j=outside_fj,
+                    k=outside_fk,
+                    color="rgb(200,200,200)",
+                    opacity=0.20,
+                    hoverinfo="skip",
+                    showlegend=False,
+                    lighting=dict(ambient=0.85, diffuse=0.55, specular=0.05, roughness=0.9),
+                    flatshading=True,
+                )
+            )
+
+        # Inside region: same colorscale as heatmap + colorbar
+        if inside_vx:
+            fig.add_trace(
+                go.Mesh3d(
+                    x=inside_vx,
+                    y=inside_vy,
+                    z=inside_vz,
+                    i=inside_fi,
+                    j=inside_fj,
+                    k=inside_fk,
+                    intensity=inside_intensity,
+                    colorscale=self.colorscale,
+                    cmin=0.0,
+                    cmax=zmax,
+                    showscale=True,
+                    colorbar=dict(
+                        title="Probability" if not self.normalize_by_area else "Prob/Area",
+                        x=1.02,
+                        xanchor="left",
+                        len=0.85,
+                    ),
+                    opacity=0.98,
+                    hoverinfo="skip",
+                    showlegend=False,
+                    lighting=dict(ambient=0.55, diffuse=0.85, specular=0.25, roughness=0.4, fresnel=0.1),
+                    flatshading=True,
+                )
+            )
+
+        # Hover overlay points
+        fig.add_trace(
+            go.Scatter3d(
+                x=hover_x,
+                y=hover_y,
+                z=hover_z,
+                mode="markers",
+                marker=dict(size=2, color="rgba(0,0,0,0)"),
+                text=hover_text,
+                hoverinfo="text",
+                showlegend=False,
+            )
+        )
+        
+        # Draw rectangle on the plane z=0
+        a_snapped, b_snapped, c_snapped, d_snapped = snapped
+        rect_x = [a_snapped, b_snapped, b_snapped, a_snapped, a_snapped]
+        rect_y = [c_snapped, c_snapped, d_snapped, d_snapped, c_snapped]
+        rect_z = [0, 0, 0, 0, 0]
+        
+        fig.add_trace(go.Scatter3d(
+            x=rect_x, y=rect_y, z=rect_z,
+            mode='lines',
+            line=dict(color='red', width=4),
+            name="Rectangle [a,b]×[c,d]",
+            hoverinfo='skip'
+        ))
+        
+        # Set camera based on view mode
+        if birds_eye:
+            camera = dict(
+                eye=dict(x=0, y=0, z=2.5),
+                center=dict(x=0, y=0, z=0),
+                up=dict(x=0, y=1, z=0)
+            )
+        else:
+            camera = dict(
+                eye=dict(x=1.5, y=1.5, z=1.2)
+            )
+        
+        # Update layout
+        fig.update_layout(
+            title=dict(
+                text=f"Joint Distribution: P(X∈[{a_snapped:.2f},{b_snapped:.2f}], Y∈[{c_snapped:.2f},{d_snapped:.2f}]) = {prob_interval:.6f}",
+                x=0.5,
+                xanchor='center',
+                font=dict(size=14)
+            ),
             scene=dict(
-                domain=dict(x=[0.07, 0.88], y=[0.10, 0.90]),
-                xaxis=dict(
-                    title="X",
-                    range=[-0.05, 1.05],
-                    showbackground=True,
-                    gridcolor="rgba(0,0,0,0.12)",
-                ),
-                yaxis=dict(
-                    title="Y",
-                    range=[-0.05, 1.05],
-                    showbackground=True,
-                    gridcolor="rgba(0,0,0,0.12)",
-                ),
-                zaxis=dict(
-                    title=z_title,
-                    range=[-0.02 * z_max if z_max > 0 else 0, z_max * 1.06],
-                    showbackground=True,
-                    gridcolor="rgba(0,0,0,0.12)",
-                ),
-                aspectmode="manual",
-                # Larger z ratio so bar heights are visible in perspective (was too flat).
-                aspectratio=dict(x=1, y=1, z=0.95 if z_max > 0 else 1),
-                camera=cam_perspective,
+                xaxis=dict(title="X", range=[-0.05, 1.05]),
+                yaxis=dict(title="Y", range=[-0.05, 1.05]),
+                zaxis=dict(title="Probability" if not self.normalize_by_area else "Probability/Area"),
+                camera=camera,
             ),
+            width=900,
+            height=700,
+            showlegend=True,
+            hovermode='closest'
         )
+        
+        return fig, prob_interval
 
-        summary = (
-            f"<b>P(X ∈ [a, b], Y ∈ [c, d])</b> with independent marginals "
-            f"X ~ Beta({self.ax_slider.value:.2f}, {self.bx_slider.value:.2f}), "
-            f"Y ~ Beta({self.ay_slider.value:.2f}, {self.by_slider.value:.2f}).<br>"
-            f"<span style='font-size:18px'>P = <b>{prob_rect:.6f}</b></span><br>"
-            f"<span style='color:#555'>Sliders a, b, c, d are multiples of Δ = {delta:.4f}. "
-            f"Max cell probability ≈ {max_prob:.5f}.</span>"
-        )
-
-        with self.plot_output:
+    
+    def update_visualization(self, *args):
+        """Update the visualization based on current parameters."""
+        probs = self.compute_probabilities()
+        
+        if self.view_mode == "Heatmap":
+            fig, prob = self.create_heatmap_figure(probs)
+        elif self.view_mode == "Birds-eye":
+            fig, prob = self.create_figure(probs, birds_eye=True)
+        else:  # 3D perspective
+            fig, prob = self.create_figure(probs, birds_eye=False)
+        
+        # Clear previous output and display new figure
+        self.current_fig = fig
+        with self.output_widget:
             clear_output(wait=True)
-            display(widgets.HTML(summary))
-            display(
-                widgets.HTML(
-                    "<style>"
-                    ".plotly-graph-div { margin-left: auto !important; margin-right: auto !important; }"
-                    "</style>"
-                )
-            )
-            fig.show(
-                config={
-                    "responsive": True,
-                    "displaylogo": False,
-                    "scrollZoom": True,
-                }
-            )
-
-    def display(self):
-        intro = widgets.HTML(
-            "<p>Bins partition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
-            "Each bar height is the cell probability, or probability divided by cell area (Riemann sum for the joint density). "
-            "Rotate the plot or use <b>View from above</b> to read the table as a heatmap; the colorbar matches bar height.</p>"
+            display(fig)
+    
+    def create_controls(self):
+        """Create interactive control widgets."""
+        # Delta x slider
+        delta_slider = widgets.FloatSlider(
+            value=self.delta_x,
+            min=0.02,
+            max=0.5,
+            step=0.02,
+            description='Δx:',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='600px')
         )
-        controls = widgets.VBox(
-            [
-                intro,
-                self.delta_slider,
-                widgets.HTML("<b>Beta parameters (marginals on [0,1])</b>"),
-                widgets.HBox([self.ax_slider, self.bx_slider]),
-                widgets.HBox([self.ay_slider, self.by_slider]),
-                self.mode_toggle,
-                widgets.HTML("<b>Rectangle [a,b] × [c,d] (values snap to multiples of Δ)</b>"),
-                widgets.HBox([self.a_slider, self.b_slider]),
-                widgets.HBox([self.c_slider, self.d_slider]),
-            ],
-            layout=widgets.Layout(
-                flex="0 0 auto",
-                width="440px",
-                max_width="440px",
-                min_width="280px",
-            ),
+        
+        # Beta parameters for X
+        alpha_x_slider = widgets.FloatSlider(
+            value=self.alpha_x,
+            min=0.5,
+            max=5,
+            step=0.1,
+            description='α(X):',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='300px')
         )
-        plot_col = widgets.VBox(
-            [self.plot_output],
-            layout=widgets.Layout(
-                flex="1 1 0%",
-                min_width="500px",
-                width="auto",
-                align_items="center",
-                padding="0 8px 0 16px",
-            ),
+        
+        beta_x_slider = widgets.FloatSlider(
+            value=self.beta_x,
+            min=0.5,
+            max=5,
+            step=0.1,
+            description='β(X):',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='300px')
         )
-        row = widgets.HBox(
-            [controls, plot_col],
-            layout=widgets.Layout(width="100%", align_items="flex-start"),
+        
+        # Beta parameters for Y
+        alpha_y_slider = widgets.FloatSlider(
+            value=self.alpha_y,
+            min=0.5,
+            max=5,
+            step=0.1,
+            description='α(Y):',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='300px')
         )
-        display(row)
+        
+        beta_y_slider = widgets.FloatSlider(
+            value=self.beta_y,
+            min=0.5,
+            max=5,
+            step=0.1,
+            description='β(Y):',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='300px')
+        )
+        
+        # Normalize by area toggle
+        normalize_toggle = widgets.Checkbox(
+            value=self.normalize_by_area,
+            description='Normalize by area (density)',
+            indent=False
+        )
+        
+        # View mode toggle
+        view_button_3d = widgets.Button(description='3D Perspective', button_style='info')
+        view_button_birds_eye = widgets.Button(description='Birds-eye', button_style='')
+        view_button_heatmap = widgets.Button(description='Heatmap', button_style='')
+        
+        def on_view_3d(b):
+            self.view_mode = "3D perspective"
+            view_button_3d.button_style = 'info'
+            view_button_birds_eye.button_style = ''
+            view_button_heatmap.button_style = ''
+            self.update_visualization()
+        
+        def on_view_birds_eye(b):
+            self.view_mode = "Birds-eye"
+            view_button_3d.button_style = ''
+            view_button_birds_eye.button_style = 'info'
+            view_button_heatmap.button_style = ''
+            self.update_visualization()
+        
+        def on_view_heatmap(b):
+            self.view_mode = "Heatmap"
+            view_button_3d.button_style = ''
+            view_button_birds_eye.button_style = ''
+            view_button_heatmap.button_style = 'info'
+            self.update_visualization()
+        
+        view_button_3d.on_click(on_view_3d)
+        view_button_birds_eye.on_click(on_view_birds_eye)
+        view_button_heatmap.on_click(on_view_heatmap)
+        
+        # Rectangle bounds - snap to multiples of delta_x
+        a_slider = widgets.FloatSlider(
+            value=self.a,
+            min=0,
+            max=1,
+            step=0.01,
+            description='a:',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='400px')
+        )
+        
+        b_slider = widgets.FloatSlider(
+            value=self.b,
+            min=0,
+            max=1,
+            step=0.01,
+            description='b:',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='400px')
+        )
+        
+        c_slider = widgets.FloatSlider(
+            value=self.c,
+            min=0,
+            max=1,
+            step=0.01,
+            description='c:',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='400px')
+        )
+        
+        d_slider = widgets.FloatSlider(
+            value=self.d,
+            min=0,
+            max=1,
+            step=0.01,
+            description='d:',
+            style={'description_width': '50px'},
+            layout=widgets.Layout(width='400px')
+        )
+        
+        # Update function
+        def on_change(change):
+            self.delta_x = delta_slider.value
+            self.alpha_x = alpha_x_slider.value
+            self.beta_x = beta_x_slider.value
+            self.alpha_y = alpha_y_slider.value
+            self.beta_y = beta_y_slider.value
+            self.normalize_by_area = normalize_toggle.value
+            
+            # Snap sliders to grid
+            self.a = self.snap_to_grid(a_slider.value)
+            self.b = self.snap_to_grid(b_slider.value)
+            self.c = self.snap_to_grid(c_slider.value)
+            self.d = self.snap_to_grid(d_slider.value)
+            
+            # Update slider displays to show snapped values
+            a_slider.value = self.a
+            b_slider.value = self.b
+            c_slider.value = self.c
+            d_slider.value = self.d
+            
+            self.update_visualization()
+        
+        # Attach handlers
+        delta_slider.observe(on_change, names='value')
+        alpha_x_slider.observe(on_change, names='value')
+        beta_x_slider.observe(on_change, names='value')
+        alpha_y_slider.observe(on_change, names='value')
+        beta_y_slider.observe(on_change, names='value')
+        normalize_toggle.observe(on_change, names='value')
+        a_slider.observe(on_change, names='value')
+        b_slider.observe(on_change, names='value')
+        c_slider.observe(on_change, names='value')
+        d_slider.observe(on_change, names='value')
+        
+        # Create layout
+        controls = widgets.VBox([
+            widgets.HTML("<b>View Mode</b>"),
+            widgets.HBox([view_button_3d, view_button_birds_eye, view_button_heatmap]),
+            widgets.HTML("<b>Bin Width</b>"),
+            delta_slider,
+            widgets.HTML("<b>X Distribution: Beta(α, β)</b>"),
+            widgets.HBox([alpha_x_slider, beta_x_slider]),
+            widgets.HTML("<b>Y Distribution: Beta(α, β)</b>"),
+            widgets.HBox([alpha_y_slider, beta_y_slider]),
+            widgets.HTML("<b>Vertical Axis</b>"),
+            normalize_toggle,
+            widgets.HTML("<b>Rectangle [a,b] × [c,d]</b>"),
+            widgets.HTML("<i>Values snap to multiples of Δx</i>"),
+            a_slider,
+            b_slider,
+            c_slider,
+            d_slider,
+        ])
+        
+        return controls
 
 
 def run_joint_distribution_demo():
-    viz = JointDistributionVisualizer()
-    viz.display()
-    return viz
+    """Run the interactive joint distribution visualizer."""
+    visualizer = JointDistributionVisualizer()
+    controls = visualizer.create_controls()
+    # Controls left, plot right.
+    display(
+        widgets.HBox(
+            [
+                controls,
+                widgets.Box([visualizer.output_widget], layout=widgets.Layout(flex="1 1 auto", min_width="700px")),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-start", gap="18px"),
+        )
+    )
+    visualizer.update_visualization()
+
+
+if __name__ == "__main__":
+    run_joint_distribution_demo()
