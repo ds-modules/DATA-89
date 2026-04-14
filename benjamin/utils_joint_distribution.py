@@ -165,13 +165,30 @@ class JointDistributionVisualizer:
         self.d_slider = widgets.FloatSlider(
             value=1.0, min=0.0, max=1.0, step=0.1, description="d (Y upper)", readout_format=".2f"
         )
+        self.summary_box = widgets.HTML()
+        self.fig = go.FigureWidget()
+        self._did_set_initial_camera = False
+        self._last_camera = None
+
+        def _on_relayout(change, _self=self):
+            # Keep track of the *current* camera whenever the user rotates/zooms
+            # or whenever the view buttons set a new camera.
+            try:
+                keys = change or {}
+                if any(str(k).startswith("scene.camera") for k in keys.keys()):
+                    _self._last_camera = _self.fig.layout.scene.camera.to_plotly_json()
+            except Exception:
+                # If we can't parse camera (e.g., during figure init), just skip.
+                return
+
+        self.fig.on_relayout(_on_relayout)
         self.plot_output = widgets.Output(
             layout=widgets.Layout(
                 flex="1 1 0%",
-                min_width="520px",
+                min_width="820px",
                 width="auto",
                 overflow="visible",
-                margin="0 0 0 16px",
+                margin="0 0 0 12px",
             )
         )
 
@@ -313,11 +330,13 @@ class JointDistributionVisualizer:
                     cmax=max(max_z, 1e-12),
                     colorbar=dict(
                         title=cbar_title,
-                        x=1.01,
+                        x=1.02,
                         xanchor="left",
-                        len=0.82,
+                        xpad=12,
+                        len=0.78,
                         y=0.5,
                         yanchor="middle",
+                        thickness=18,
                     ),
                     lighting=dict(ambient=0.65, diffuse=0.85, specular=0.4),
                     name="Selected region",
@@ -341,11 +360,13 @@ class JointDistributionVisualizer:
                         showscale=True,
                         colorbar=dict(
                             title=cbar_title,
-                            x=1.01,
+                            x=1.02,
                             xanchor="left",
-                            len=0.82,
+                            xpad=12,
+                            len=0.78,
                             y=0.5,
                             yanchor="middle",
+                            thickness=18,
                         ),
                         opacity=0.0,
                     ),
@@ -359,12 +380,12 @@ class JointDistributionVisualizer:
                 go.Scatter3d(x=[0], y=[0], z=[0], mode="markers", marker=dict(size=2, opacity=0))
             )
 
-        fig = go.Figure(data=traces)
         z_max = max(max_z * 1.08, 1e-6)
-        z_center = float(0.4 * z_max)
-        # Pull camera back so the full [0,1]² footprint stays in view (reduces corner clipping).
+        z_center = float(0.45 * z_max)
+        # Default view: closer camera so the bars fill the frame (less empty whitespace),
+        # while still keeping the full [0,1]^2 footprint visible.
         cam_perspective = dict(
-            eye=dict(x=2.65, y=-2.65, z=1.75),
+            eye=dict(x=2.05, y=-2.05, z=1.25),
             center=dict(x=0.5, y=0.5, z=z_center),
             up=dict(x=0, y=0, z=1),
         )
@@ -374,23 +395,28 @@ class JointDistributionVisualizer:
             up=dict(x=0, y=1, z=0),
         )
 
-        fig.update_layout(
+        layout_update = dict(
             title=dict(
                 text="Joint distribution on [0,1]² (independent Beta marginals)",
                 x=0.5,
                 xanchor="center",
+                y=0.98,
+                yanchor="top",
+                font=dict(size=15),
             ),
             template="plotly_white",
             autosize=True,
-            height=680,
-            margin=dict(l=8, r=96, t=56, b=8),
+            # Make the figure big, and reserve extra bottom space so rotating downward doesn't clip.
+            height=1120,
+            # Reduce whitespace by 20px on left/top/bottom.
+            margin=dict(l=0, r=46, t=14, b=120),
             updatemenus=[
                 dict(
                     type="buttons",
                     direction="left",
-                    x=0.02,
-                    y=1.02,
-                    xanchor="left",
+                    x=0.5,
+                    y=1.008,
+                    xanchor="center",
                     yanchor="bottom",
                     showactive=False,
                     buttons=[
@@ -408,6 +434,8 @@ class JointDistributionVisualizer:
                 )
             ],
             scene=dict(
+                # Fill the inner plotting area (leave right strip for colorbar).
+                domain=dict(x=[0.01, 0.94], y=[0.02, 0.99]),
                 xaxis=dict(
                     title="X",
                     range=[-0.05, 1.05],
@@ -427,9 +455,10 @@ class JointDistributionVisualizer:
                     gridcolor="rgba(0,0,0,0.12)",
                 ),
                 aspectmode="manual",
-                aspectratio=dict(x=1, y=1, z=0.5 if z_max > 0 else 1),
-                camera=cam_perspective,
+                aspectratio=dict(x=1, y=1, z=0.72 if z_max > 0 else 1),
             ),
+            # Keep the user's current rotation/zoom when sliders change.
+            uirevision="joint_dist_v1",
         )
 
         summary = (
@@ -441,16 +470,33 @@ class JointDistributionVisualizer:
             f"Max cell probability ≈ {max_prob:.5f}.</span>"
         )
 
+        self.summary_box.value = summary
+
+        # Update the existing FigureWidget so the camera angle stays where the student left it.
+        camera_to_keep = self._last_camera
+        if camera_to_keep is None:
+            try:
+                camera_to_keep = self.fig.layout.scene.camera.to_plotly_json()
+            except Exception:
+                camera_to_keep = None
+
+        with self.fig.batch_update():
+            # Replacing `data` can reset view in some notebook frontends; we reapply the camera after.
+            self.fig.data = traces
+            self.fig.layout.update(layout_update)
+            if not self._did_set_initial_camera:
+                self.fig.layout.scene.camera = cam_perspective
+                self._did_set_initial_camera = True
+
+            # Always restore the user's last camera (also preserves heatmap vs 3D perspective).
+            if camera_to_keep is not None:
+                self.fig.layout.scene.camera = camera_to_keep
+                self._last_camera = camera_to_keep
+
         with self.plot_output:
             clear_output(wait=True)
-            display(widgets.HTML(summary))
-            fig.show(
-                config={
-                    "responsive": True,
-                    "displaylogo": False,
-                    "scrollZoom": True,
-                }
-            )
+            display(self.summary_box)
+            display(self.fig)
 
     def display(self):
         intro = widgets.HTML(
