@@ -311,9 +311,11 @@ class JointDistributionVisualizer:
                 y=hover_y,
                 z=hover_z,
                 mode="markers",
-                marker=dict(size=2, color="rgba(0,0,0,0)"),
-                text=hover_text,
-                hoverinfo="text",
+                # Make hovering easy in both 3D and birds-eye:
+                # a tiny-but-not-zero alpha marker captures hover events reliably.
+                # Bigger marker radius = easier hit-testing (less pixel-perfect).
+                marker=dict(size=14, color="rgba(0,0,0,0.03)"),
+                hovertemplate="x=%{x:.3f}<br>y=%{y:.3f}<br>height=%{z:.6g}<extra></extra>",
                 showlegend=False,
             )
         )
