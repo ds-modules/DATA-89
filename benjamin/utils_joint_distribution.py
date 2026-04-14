@@ -184,11 +184,10 @@ class JointDistributionVisualizer:
         self.fig.on_relayout(_on_relayout)
         self.plot_output = widgets.Output(
             layout=widgets.Layout(
-                flex="1 1 0%",
-                min_width="820px",
-                width="auto",
+                width="100%",
+                max_width="980px",
+                min_width="480px",
                 overflow="visible",
-                margin="0 0 0 12px",
             )
         )
 
@@ -332,7 +331,7 @@ class JointDistributionVisualizer:
                         title=cbar_title,
                         x=1.02,
                         xanchor="left",
-                        xpad=12,
+                        xpad=28,
                         len=0.78,
                         y=0.5,
                         yanchor="middle",
@@ -362,7 +361,7 @@ class JointDistributionVisualizer:
                             title=cbar_title,
                             x=1.02,
                             xanchor="left",
-                            xpad=12,
+                            xpad=28,
                             len=0.78,
                             y=0.5,
                             yanchor="middle",
@@ -382,10 +381,10 @@ class JointDistributionVisualizer:
 
         z_max = max(max_z * 1.08, 1e-6)
         z_center = float(0.45 * z_max)
-        # Default view: closer camera so the bars fill the frame (less empty whitespace),
-        # while still keeping the full [0,1]^2 footprint visible.
+        # Perspective: lower eye z vs diagonal distance so bars read as 3D (not bird's-eye).
+        # Pull back so the full [0,1]² footprint stays in frame.
         cam_perspective = dict(
-            eye=dict(x=2.05, y=-2.05, z=1.25),
+            eye=dict(x=2.95, y=-2.95, z=1.38),
             center=dict(x=0.5, y=0.5, z=z_center),
             up=dict(x=0, y=0, z=1),
         )
@@ -400,22 +399,19 @@ class JointDistributionVisualizer:
                 text="Joint distribution on [0,1]² (independent Beta marginals)",
                 x=0.5,
                 xanchor="center",
-                y=0.98,
+                y=0.97,
                 yanchor="top",
-                font=dict(size=15),
             ),
             template="plotly_white",
             autosize=True,
-            # Make the figure big, and reserve extra bottom space so rotating downward doesn't clip.
-            height=1120,
-            # Reduce whitespace by 20px on left/top/bottom.
-            margin=dict(l=0, r=46, t=14, b=120),
+            height=700,
+            margin=dict(l=150, r=160, t=78, b=150),
             updatemenus=[
                 dict(
                     type="buttons",
                     direction="left",
                     x=0.5,
-                    y=1.008,
+                    y=1.005,
                     xanchor="center",
                     yanchor="bottom",
                     showactive=False,
@@ -434,8 +430,8 @@ class JointDistributionVisualizer:
                 )
             ],
             scene=dict(
-                # Fill the inner plotting area (leave right strip for colorbar).
-                domain=dict(x=[0.01, 0.94], y=[0.02, 0.99]),
+                # Slightly narrower x-domain so the 3D scene sits left of the colorbar with more gap.
+                domain=dict(x=[0.07, 0.84], y=[0.10, 0.90]),
                 xaxis=dict(
                     title="X",
                     range=[-0.05, 1.05],
@@ -455,7 +451,9 @@ class JointDistributionVisualizer:
                     gridcolor="rgba(0,0,0,0.12)",
                 ),
                 aspectmode="manual",
-                aspectratio=dict(x=1, y=1, z=0.72 if z_max > 0 else 1),
+                # Larger z ratio so bar heights are visible in perspective (was too flat).
+                aspectratio=dict(x=1, y=1, z=0.95 if z_max > 0 else 1),
+                camera=cam_perspective,
             ),
             # Keep the user's current rotation/zoom when sliders change.
             uirevision="joint_dist_v1",
@@ -495,12 +493,25 @@ class JointDistributionVisualizer:
 
         with self.plot_output:
             clear_output(wait=True)
-            display(self.summary_box)
-            display(self.fig)
+            display(widgets.HTML(summary))
+            display(
+                widgets.HTML(
+                    "<style>"
+                    ".plotly-graph-div { margin-left: auto !important; margin-right: auto !important; }"
+                    "</style>"
+                )
+            )
+            fig.show(
+                config={
+                    "responsive": True,
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                }
+            )
 
     def display(self):
         intro = widgets.HTML(
-            "<p>Bins partition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
+            "<tition [0,1] with width <b>Δ</b> (last bin may be shorter if 1/Δ is not an integer). "
             "Each bar height is the cell probability, or probability divided by cell area (Riemann sum for the joint density). "
             "Rotate the plot or use <b>View from above</b> to read the table as a heatmap; the colorbar matches bar height.</p>"
         )
@@ -523,8 +534,18 @@ class JointDistributionVisualizer:
                 min_width="280px",
             ),
         )
+        plot_col = widgets.VBox(
+            [self.plot_output],
+            layout=widgets.Layout(
+                flex="1 1 0%",
+                min_width="500px",
+                width="auto",
+                align_items="center",
+                padding="0 8px 0 16px",
+            ),
+        )
         row = widgets.HBox(
-            [controls, self.plot_output],
+            [controls, plot_col],
             layout=widgets.Layout(width="100%", align_items="flex-start"),
         )
         display(row)
