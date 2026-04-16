@@ -42,7 +42,7 @@ class JointDistributionVisualizer:
         self.output_widget = widgets.Output()
         self.colorscale = "YlGnBu"
         # Fixed z / color limits (no auto-fit) so changing Δx changes bar height when not using density.
-        self.zlim_chance = (0.0, 0.1)
+        self.zlim_chance = (0.0, 0.05)
         # Density can reasonably exceed 2 for Beta marginals; cap higher to avoid clipping.
         self.zlim_density = (0.0, 3.0)
         self.prob_label = widgets.HTML(value=self._prob_html(None))
