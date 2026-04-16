@@ -31,8 +31,8 @@ def _make_float_text(name: str, default: float) -> widgets.FloatText:
     return widgets.FloatText(
         value=default,
         description=f"{name}:",
-        layout=widgets.Layout(width="200px"),
-        style={"description_width": "72px"},
+        layout=widgets.Layout(width="145px"),
+        style={"description_width": "48px"},
     )
 
 
@@ -125,8 +125,20 @@ class ConvolutionVisualization:
     """Marginal densities, joint density, slider s, product / convolution overlays."""
 
     def __init__(self):
-        self.x_kind = widgets.Dropdown(options=DIST_NAMES, value="normal", description="X:")
-        self.y_kind = widgets.Dropdown(options=DIST_NAMES, value="normal", description="Y:")
+        self.x_kind = widgets.Dropdown(
+            options=DIST_NAMES,
+            value="normal",
+            description="X:",
+            layout=widgets.Layout(width="155px"),
+            style={"description_width": "20px"},
+        )
+        self.y_kind = widgets.Dropdown(
+            options=DIST_NAMES,
+            value="normal",
+            description="Y:",
+            layout=widgets.Layout(width="155px"),
+            style={"description_width": "20px"},
+        )
 
         self._x_param_box = widgets.HBox([])
         self._y_param_box = widgets.HBox([])
@@ -147,14 +159,19 @@ class ConvolutionVisualization:
             step=0.02,
             readout_format=".3f",
             continuous_update=True,
-            layout=widgets.Layout(width="420px"),
+            layout=widgets.Layout(width="290px"),
         )
 
         self.plot_product = widgets.Checkbox(value=False, description="Plot product", indent=False)
         self.compute_conv = widgets.Checkbox(value=False, description="Compute convolution", indent=False)
-        self.reveal_toggle = widgets.ToggleButton(value=False, description="Reveal convolution", tooltip="Show f_S on bottom panel")
+        self.reveal_toggle = widgets.ToggleButton(
+            value=False, description="Reveal convolution", tooltip="Show f_S on bottom panel"
+        )
 
-        self.save_btn = widgets.Button(description="Save convolution value", layout=widgets.Layout(width="200px"))
+        self.save_btn = widgets.Button(
+            description="Save convolution value",
+            layout=widgets.Layout(width="160px"),
+        )
 
         self.conv_readout = widgets.HTML(value="")
 
@@ -428,18 +445,26 @@ class ConvolutionVisualization:
         controls_x = widgets.VBox(
             [
                 widgets.HTML("<b>Distribution for <i>X</i></b>"),
-                widgets.HBox([self.x_kind, self._x_param_box]),
-            ]
+                widgets.HBox(
+                    [self.x_kind, self._x_param_box],
+                    layout=widgets.Layout(gap="8px", align_items="center"),
+                ),
+            ],
+            layout=widgets.Layout(width="fit-content"),
         )
         controls_y = widgets.VBox(
             [
                 widgets.HTML("<b>Distribution for <i>Y</i></b>"),
-                widgets.HBox([self.y_kind, self._y_param_box]),
-            ]
+                widgets.HBox(
+                    [self.y_kind, self._y_param_box],
+                    layout=widgets.Layout(gap="8px", align_items="center"),
+                ),
+            ],
+            layout=widgets.Layout(width="fit-content"),
         )
         top = widgets.HBox(
             [controls_x, controls_y],
-            layout=widgets.Layout(gap="32px", flex_wrap="wrap"),
+            layout=widgets.Layout(gap="14px", flex_wrap="wrap", align_items="flex-start"),
         )
         row = widgets.HBox(
             [
@@ -449,7 +474,7 @@ class ConvolutionVisualization:
                 self.reveal_toggle,
                 self.save_btn,
             ],
-            layout=widgets.Layout(gap="16px", flex_wrap="wrap", align_items="center"),
+            layout=widgets.Layout(gap="8px", flex_wrap="wrap", align_items="center"),
         )
         ui = widgets.VBox(
             [
