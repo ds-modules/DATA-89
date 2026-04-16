@@ -25,8 +25,8 @@ class JointDistributionVisualizer:
     """Interactive visualizer for joint distributions."""
 
     def __init__(self):
-        # Coarsest bins (largest Δx) by default — fewest cells; cap Δx at 0.25.
-        self.delta_x = 0.25
+        # Use Δx = 1/n so bins evenly partition [0,1]. Largest (coarsest) allowed is 1/8.
+        self.delta_x = 1.0 / 8
         self.alpha_x = 2.0
         self.beta_x = 2.0
         self.alpha_y = 2.0
@@ -50,12 +50,12 @@ class JointDistributionVisualizer:
         """Big blue box (same convention as utils_dist.py) — under the plot."""
         if prob is None:
             inner = (
-                '<b>Computed probability (bin centers in rectangle):</b> '
+                '<b>Highlighted Volume (bin centers in rectangle):</b> '
                 '<span style="color: #999; font-size: 16px;">—</span>'
             )
         else:
             inner = (
-                f'<b>Computed probability (bin centers in rectangle):</b> '
+                f'<b>Highlighted Volume (bin centers in rectangle):</b> '
                 f'<span style="color: #0066cc; font-size: 22px; font-weight: bold; '
                 f'background-color: white; padding: 4px 8px; border-radius: 4px;">{prob:.6f}</span>'
             )
@@ -391,15 +391,18 @@ class JointDistributionVisualizer:
 
     def create_controls(self):
         """Create interactive control widgets."""
-        delta_slider = widgets.FloatSlider(
-            value=min(self.delta_x, 0.25),
-            min=0.02,
-            max=0.25,
-            step=0.01,
-            description="Δx:",
+        # Choose an integer number of bins n, then set Δx = 1/n.
+        # This guarantees Δx evenly divides [0,1].
+        n_slider = widgets.IntSlider(
+            value=max(8, int(round(1.0 / self.delta_x))),
+            min=8,
+            max=50,
+            step=1,
+            description="n bins:",
             style={"description_width": "50px"},
             layout=widgets.Layout(width="600px"),
         )
+        delta_readout = widgets.HTML(value=f"<b>Δx</b> = {1.0 / int(n_slider.value):.6g}")
 
         alpha_x_slider = widgets.FloatSlider(
             value=self.alpha_x,
@@ -529,7 +532,9 @@ class JointDistributionVisualizer:
         )
 
         def on_change(_change):
-            self.delta_x = float(delta_slider.value)
+            n = int(n_slider.value)
+            self.delta_x = 1.0 / n
+            delta_readout.value = f"<b>Δx</b> = {self.delta_x:.6g}"
             self.alpha_x = float(alpha_x_slider.value)
             self.beta_x = float(beta_x_slider.value)
             self.alpha_y = float(alpha_y_slider.value)
@@ -556,7 +561,7 @@ class JointDistributionVisualizer:
 
         round_rect_btn.on_click(on_round_rect)
 
-        delta_slider.observe(on_change, names="value")
+        n_slider.observe(on_change, names="value")
         alpha_x_slider.observe(on_change, names="value")
         beta_x_slider.observe(on_change, names="value")
         alpha_y_slider.observe(on_change, names="value")
@@ -572,7 +577,8 @@ class JointDistributionVisualizer:
                 widgets.HTML("<b>View Mode</b>"),
                 widgets.HBox([view_button_3d, view_button_birds_eye, view_button_heatmap]),
                 widgets.HTML("<b>Bin Width</b>"),
-                delta_slider,
+                n_slider,
+                delta_readout,
                 widgets.HTML("<b>X Distribution: Beta(α, β)</b>"),
                 widgets.HBox([alpha_x_slider, beta_x_slider]),
                 widgets.HTML("<b>Y Distribution: Beta(α, β)</b>"),
