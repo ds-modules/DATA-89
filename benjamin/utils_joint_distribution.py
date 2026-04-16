@@ -43,7 +43,8 @@ class JointDistributionVisualizer:
         self.colorscale = "YlGnBu"
         # Fixed z / color limits (no auto-fit) so changing Δx changes bar height when not using density.
         self.zlim_chance = (0.0, 0.15)
-        self.zlim_density = (0.0, 2.0)
+        # Density can reasonably exceed 2 for Beta marginals; cap higher to avoid clipping.
+        self.zlim_density = (0.0, 5.0)
         self.prob_label = widgets.HTML(value=self._prob_html(None))
 
     def _prob_html(self, prob):
@@ -129,7 +130,15 @@ class JointDistributionVisualizer:
         """Create 2D heatmap with grey mask outside the selected rectangle."""
         n_bins = probs.shape[0]
         heights = self.get_bar_heights(probs)
-        z0, z1 = self.zlim_density if self.normalize_by_area else self.zlim_chance
+        z0, z1_cap = self.zlim_density if self.normalize_by_area else self.zlim_chance
+        # In density mode, auto-scale to the actual peak (up to a cap) so the heatmap
+        # uses the full dynamic range for "reasonable" densities without clipping.
+        if self.normalize_by_area:
+            z1 = min(float(z1_cap), float(np.nanmax(heights)))
+            if z1 <= z0:
+                z1 = float(z1_cap)
+        else:
+            z1 = float(z1_cap)
 
         prob_interval, _mask, rect = self.compute_interval_probability(probs)
         a_vis, b_vis, c_vis, d_vis = rect
@@ -193,7 +202,13 @@ class JointDistributionVisualizer:
         """Create 3D histogram (Mesh3d); bin highlight uses bin centers in rectangle."""
         n_bins = probs.shape[0]
         heights = self.get_bar_heights(probs)
-        z0, z1 = self.zlim_density if self.normalize_by_area else self.zlim_chance
+        z0, z1_cap = self.zlim_density if self.normalize_by_area else self.zlim_chance
+        if self.normalize_by_area:
+            z1 = min(float(z1_cap), float(np.nanmax(heights)))
+            if z1 <= z0:
+                z1 = float(z1_cap)
+        else:
+            z1 = float(z1_cap)
 
         prob_interval, sel_mask, rect = self.compute_interval_probability(probs)
         a_vis, b_vis, c_vis, d_vis = rect
@@ -365,6 +380,10 @@ class JointDistributionVisualizer:
                     range=[z0, z1],
                 ),
                 camera=camera,
+                # Keep the 3D box from looking "tall and skinny" by compressing z relative to x/y.
+                # This also helps keep the scene comfortably within the interactive viewport.
+                aspectmode="manual",
+                aspectratio=dict(x=1.0, y=1.0, z=0.55),
             ),
             width=900,
             height=700,
