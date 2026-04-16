@@ -343,7 +343,9 @@ class JointDistributionVisualizer:
             )
         else:
             camera = dict(
-                eye=dict(x=1.5, y=1.5, z=1.2),
+                # View from the "front" (negative y) and slightly right (positive x)
+                # so +x goes right and +y goes into the screen.
+                eye=dict(x=-1.6, y=-1.6, z=1.2),
                 projection=_ortho,
             )
 
