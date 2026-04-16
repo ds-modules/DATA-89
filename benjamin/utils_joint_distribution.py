@@ -42,9 +42,9 @@ class JointDistributionVisualizer:
         self.output_widget = widgets.Output()
         self.colorscale = "YlGnBu"
         # Fixed z / color limits (no auto-fit) so changing Δx changes bar height when not using density.
-        self.zlim_chance = (0.0, 0.15)
+        self.zlim_chance = (0.0, 0.1)
         # Density can reasonably exceed 2 for Beta marginals; cap higher to avoid clipping.
-        self.zlim_density = (0.0, 5.0)
+        self.zlim_density = (0.0, 3.0)
         self.prob_label = widgets.HTML(value=self._prob_html(None))
 
     def _prob_html(self, prob):
@@ -131,13 +131,11 @@ class JointDistributionVisualizer:
         n_bins = probs.shape[0]
         heights = self.get_bar_heights(probs)
         z0, z1_cap = self.zlim_density if self.normalize_by_area else self.zlim_chance
-        # In density mode, auto-scale to the actual peak (up to a cap) so the heatmap
-        # uses the full dynamic range for "reasonable" densities without clipping.
-        if self.normalize_by_area:
-            z1 = min(float(z1_cap), float(np.nanmax(heights)))
-            if z1 <= z0:
-                z1 = float(z1_cap)
-        else:
+        # Auto-scale to the displayed peak, but never below the configured threshold.
+        # This avoids clipping when densities exceed the threshold while keeping a stable
+        # range when the peak is smaller.
+        z1 = max(float(z1_cap), float(np.nanmax(heights)))
+        if z1 <= z0:
             z1 = float(z1_cap)
 
         prob_interval, _mask, rect = self.compute_interval_probability(probs)
@@ -203,11 +201,8 @@ class JointDistributionVisualizer:
         n_bins = probs.shape[0]
         heights = self.get_bar_heights(probs)
         z0, z1_cap = self.zlim_density if self.normalize_by_area else self.zlim_chance
-        if self.normalize_by_area:
-            z1 = min(float(z1_cap), float(np.nanmax(heights)))
-            if z1 <= z0:
-                z1 = float(z1_cap)
-        else:
+        z1 = max(float(z1_cap), float(np.nanmax(heights)))
+        if z1 <= z0:
             z1 = float(z1_cap)
 
         prob_interval, sel_mask, rect = self.compute_interval_probability(probs)
@@ -290,7 +285,7 @@ class JointDistributionVisualizer:
                     j=outside_fj,
                     k=outside_fk,
                     color="rgb(200,200,200)",
-                    opacity=0.20,
+                    opacity=0.08,
                     hoverinfo="skip",
                     showlegend=False,
                     lighting=dict(ambient=0.85, diffuse=0.55, specular=0.05, roughness=0.9),
@@ -318,7 +313,7 @@ class JointDistributionVisualizer:
                         xanchor="left",
                         len=0.85,
                     ),
-                    opacity=0.98,
+                    opacity=1.0,
                     customdata=np.asarray(inside_customdata, dtype=float),
                     hovertemplate=(
                         "<b>Bin center</b><br>"
@@ -373,11 +368,35 @@ class JointDistributionVisualizer:
             ),
             autosize=False,
             scene=dict(
-                xaxis=dict(title="X", range=[-0.05, 1.05]),
-                yaxis=dict(title="Y", range=[-0.05, 1.05]),
+                xaxis=dict(
+                    title="X",
+                    range=[-0.05, 1.05],
+                    showbackground=True,
+                    showgrid=True,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    ticks="outside",
+                ),
+                yaxis=dict(
+                    title="Y",
+                    range=[-0.05, 1.05],
+                    showbackground=True,
+                    showgrid=True,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    ticks="outside",
+                ),
                 zaxis=dict(
                     title="Probability" if not self.normalize_by_area else "Probability/Area",
                     range=[z0, z1],
+                    showbackground=True,
+                    showgrid=True,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    ticks="outside",
                 ),
                 camera=camera,
                 # Keep the 3D box from looking "tall and skinny" by compressing z relative to x/y.
