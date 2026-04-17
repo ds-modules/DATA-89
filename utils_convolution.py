@@ -13,18 +13,40 @@ from scipy.integrate import quad
 
 COLOR_X = "#2E86AB"
 COLOR_Y = "#E94F37"
+COLOR_PRODUCT = "#3d1566"
+# Bright red: reads clearly on viridis (avoids clashing with heatmap yellows)
+COLOR_JOINT_LINE = "#FF1744"
+
+_CONV_READOUT_PLACEHOLDER = (
+    '<div style="min-height:3em;padding:12px 16px;background:#f0f6fb;border-radius:8px;'
+    'border:1px dashed #7a9ab8;font-size:15px;line-height:1.5;color:#37474f;">'
+    "Turn on <b>Compute convolution</b> to see the shaded integral "
+    r"<code style='font-size:14px;background:#fff;padding:2px 6px;border-radius:4px;'>∫ f_X(x) f_Y(s−x) dx</code> "
+    "here.</div>"
+)
 
 DIST_NAMES = ("uniform", "exponential", "pareto", "beta", "gamma", "normal")
 
-# Default parameter specs: (name, default)
-_PARAM_SPECS: dict[str, list[tuple[str, float]]] = {
-    "uniform": [("low", 0.0), ("high", 1.0)],
-    "exponential": [("scale", 1.0)],
-    "pareto": [("b", 2.0), ("scale", 1.0)],
-    "beta": [("a", 2.0), ("b", 2.0)],
-    "gamma": [("a", 2.0), ("scale", 1.0)],
-    "normal": [("loc", 0.0), ("scale", 1.0)],
-}
+
+def _param_specs_for(which: str, kind: str) -> list[tuple[str, float]]:
+    """Parameter names and defaults; X vs Y differ so marginal curves do not coincide by default."""
+    k = kind.lower()
+    side = "x" if which.lower() == "x" else "y"
+    if k == "uniform":
+        if side == "x":
+            return [("low", 0.0), ("high", 1.0)]
+        return [("low", 2.0), ("high", 3.0)]
+    if k == "exponential":
+        return [("scale", 1.0)] if side == "x" else [("scale", 1.5)]
+    if k == "pareto":
+        return [("b", 2.0), ("scale", 1.0)] if side == "x" else [("b", 2.5), ("scale", 1.2)]
+    if k == "beta":
+        return [("a", 2.0), ("b", 2.0)] if side == "x" else [("a", 2.0), ("b", 5.0)]
+    if k == "gamma":
+        return [("a", 2.0), ("scale", 1.0)] if side == "x" else [("a", 3.0), ("scale", 0.85)]
+    if k == "normal":
+        return [("loc", 0.0), ("scale", 1.0)] if side == "x" else [("loc", 2.5), ("scale", 1.0)]
+    raise ValueError(f"Unknown distribution: {kind}")
 
 
 def _make_float_text(name: str, default: float) -> widgets.FloatText:
@@ -66,15 +88,46 @@ def build_dist(kind: str, params: dict[str, float]):
     raise ValueError(f"Unknown distribution: {kind}")
 
 
-def _finite_support(dist, eps: float = 1e-10) -> tuple[float, float]:
+def _finite_support(dist, eps: float = 1e-7) -> tuple[float, float]:
+    """Wide-but-bounded interval for quadrature (avoids astronomically long heavy tails)."""
     lo, hi = float(dist.ppf(eps)), float(dist.ppf(1.0 - eps))
     if not np.isfinite(lo):
         lo = float(dist.ppf(1e-4))
     if not np.isfinite(hi):
         hi = float(dist.ppf(1.0 - 1e-4))
+    p99 = float(dist.ppf(0.99))
+    if np.isfinite(p99) and np.isfinite(hi) and p99 > lo:
+        for cap_q in (0.998, 0.995, 0.99, 0.97, 0.95):
+            if hi <= 80.0 * max(abs(p99), 1e-9):
+                break
+            hi = float(min(hi, dist.ppf(cap_q)))
     if lo >= hi:
-        mid = float(dist.mean()) if np.isfinite(dist.mean()) else 0.0
+        mid = float(dist.median()) if np.isfinite(dist.median()) else float(dist.mean())
+        if not np.isfinite(mid):
+            mid = 0.0
         lo, hi = mid - 5.0, mid + 5.0
+    return lo, hi
+
+
+def _display_support(dist, q_lo: float = 0.005, q_hi: float = 0.995) -> tuple[float, float]:
+    """Tight view window for plots: most mass + caps on explosive upper tails."""
+    lo, hi = float(dist.ppf(q_lo)), float(dist.ppf(q_hi))
+    if not np.isfinite(lo):
+        lo = float(dist.ppf(0.02))
+    if not np.isfinite(hi):
+        hi = float(dist.ppf(0.98))
+    p97 = float(dist.ppf(0.97))
+    if np.isfinite(p97) and np.isfinite(hi) and p97 > lo:
+        for cap_q in (0.99, 0.985, 0.98, 0.97, 0.95):
+            if hi <= 40.0 * max(abs(p97), 1e-9):
+                break
+            hi = float(min(hi, dist.ppf(cap_q)))
+    if lo >= hi:
+        mid = float(dist.median()) if np.isfinite(dist.median()) else float(dist.mean())
+        if not np.isfinite(mid):
+            mid = 0.5 * (lo + hi)
+        span = max(hi - lo, 1e-6)
+        lo, hi = mid - span, mid + span
     return lo, hi
 
 
@@ -127,14 +180,14 @@ class ConvolutionVisualization:
     def __init__(self):
         self.x_kind = widgets.Dropdown(
             options=DIST_NAMES,
-            value="normal",
+            value="uniform",
             description="X:",
             layout=widgets.Layout(width="155px"),
             style={"description_width": "20px"},
         )
         self.y_kind = widgets.Dropdown(
             options=DIST_NAMES,
-            value="normal",
+            value="uniform",
             description="Y:",
             layout=widgets.Layout(width="155px"),
             style={"description_width": "20px"},
@@ -152,18 +205,48 @@ class ConvolutionVisualization:
         self.y_kind.observe(lambda *_: self._on_kind_change("y"), names="value")
 
         self.s_slider = widgets.FloatSlider(
-            description="s",
+            description="",
             value=0.0,
             min=-12.0,
             max=12.0,
             step=0.02,
             readout_format=".3f",
             continuous_update=True,
-            layout=widgets.Layout(width="290px"),
+            layout=widgets.Layout(flex="1 1 auto", min_width="320px", max_width="560px", height="40px"),
+            style=widgets.SliderStyle(handle_color=COLOR_X),
+        )
+        self._s_label = widgets.HTML(
+            '<span style="font-size:20px;font-weight:800;color:#0d3a5c;letter-spacing:0.02em;">s</span>'
         )
 
-        self.plot_product = widgets.Checkbox(value=False, description="Plot product", indent=False)
-        self.compute_conv = widgets.Checkbox(value=False, description="Compute convolution", indent=False)
+        # Border on Checkbox itself misaligns in many themes; wrap each in its own centered HBox.
+        def _checkbox_outer_layout() -> widgets.Layout:
+            return widgets.Layout(
+                padding="10px 16px",
+                border="2px solid #bcd4e6",
+                border_radius="8px",
+                margin="0 8px 0 0",
+                align_items="center",
+                justify_content="center",
+                width="fit-content",
+            )
+
+        self.plot_product = widgets.Checkbox(
+            value=False,
+            description="Plot product",
+            indent=False,
+            layout=widgets.Layout(width="fit-content", height="fit-content"),
+            style={"description_width": "initial"},
+        )
+        self.compute_conv = widgets.Checkbox(
+            value=False,
+            description="Compute convolution",
+            indent=False,
+            layout=widgets.Layout(width="fit-content", height="fit-content"),
+            style={"description_width": "initial"},
+        )
+        self._plot_product_frame = widgets.HBox([self.plot_product], layout=_checkbox_outer_layout())
+        self._compute_conv_frame = widgets.HBox([self.compute_conv], layout=_checkbox_outer_layout())
         self.reveal_toggle = widgets.ToggleButton(
             value=False, description="Reveal convolution", tooltip="Show f_S on bottom panel"
         )
@@ -173,13 +256,18 @@ class ConvolutionVisualization:
             layout=widgets.Layout(width="160px"),
         )
 
-        self.conv_readout = widgets.HTML(value="")
+        self.conv_readout = widgets.HTML(
+            value=_CONV_READOUT_PLACEHOLDER,
+            layout=widgets.Layout(width="100%", margin="12px 0 0 0"),
+        )
 
         self.saved_points: list[tuple[float, float]] = []
 
         self._curve_cache: dict | None = None
         self._curve_sig = None
         self._slider_sig = None
+        self._kind_sig: tuple[str, str] | None = None
+        self._render_depth = 0
 
         self.out = widgets.Output()
 
@@ -216,7 +304,7 @@ class ConvolutionVisualization:
             except Exception:
                 pass
 
-        specs = _PARAM_SPECS[kind_w.value]
+        specs = _param_specs_for(which, kind_w.value)
         newd: dict[str, widgets.FloatText] = {}
         children = []
         for name, default in specs:
@@ -228,7 +316,12 @@ class ConvolutionVisualization:
         setattr(self, dict_attr, newd)
         getattr(self, box_attr).children = tuple(children)
 
-    def _update_s_slider_range(self) -> None:
+    def _default_s_for_joint_window(self, dx, dy) -> float:
+        """Pick s so x + y = s meets the joint plot rectangle (same bounds as heatmap)."""
+        (jx_lo, jx_hi), (jy_lo, jy_hi) = self._joint_bounds(dx, dy)
+        return 0.5 * (jx_lo + jy_lo + jx_hi + jy_hi)
+
+    def _update_s_slider_range(self, center_s_for_joint: bool = True) -> None:
         try:
             dx = build_dist(self.x_kind.value, self._read_params("x"))
             dy = build_dist(self.y_kind.value, self._read_params("y"))
@@ -239,9 +332,18 @@ class ConvolutionVisualization:
             self.s_slider.max = float(hi + pad)
             step = max(span / 400.0, 0.01)
             self.s_slider.step = float(step)
-            mid = 0.5 * (self.s_slider.min + self.s_slider.max)
-            if not (self.s_slider.min <= self.s_slider.value <= self.s_slider.max):
-                self.s_slider.value = float(mid)
+            if center_s_for_joint:
+                s_joint = float(self._default_s_for_joint_window(dx, dy))
+                if not np.isfinite(s_joint):
+                    s_joint = 0.5 * (self.s_slider.min + self.s_slider.max)
+                self.s_slider.value = float(np.clip(s_joint, self.s_slider.min, self.s_slider.max))
+            else:
+                mid = 0.5 * (self.s_slider.min + self.s_slider.max)
+                cur = float(self.s_slider.value)
+                if not (self.s_slider.min <= cur <= self.s_slider.max):
+                    self.s_slider.value = float(mid)
+                else:
+                    self.s_slider.value = float(np.clip(cur, self.s_slider.min, self.s_slider.max))
         except Exception:
             pass
 
@@ -257,14 +359,32 @@ class ConvolutionVisualization:
             tuple(sorted(self._read_params("y").items())),
         )
 
+    def _kind_signature(self) -> tuple[str, str]:
+        return (self.x_kind.value, self.y_kind.value)
+
+    def _reset_interactive_plot_state(self) -> None:
+        """Clear overlays and saved samples when the user picks a new distribution family."""
+        self.saved_points = []
+        self.conv_readout.value = _CONV_READOUT_PLACEHOLDER
+        self.plot_product.value = False
+        self.compute_conv.value = False
+        self.reveal_toggle.value = False
+
     def _maybe_update_slider_bounds(self) -> None:
         sig = self._dist_sig()
         if self._slider_sig == sig:
             return
+        prior_kind = self._kind_sig
+        kind_sig = self._kind_signature()
+        # First open (prior_kind is None) or X/Y family dropdown changed
+        kind_changed = prior_kind is None or prior_kind != kind_sig
+        if self._kind_sig != kind_sig:
+            self._reset_interactive_plot_state()
+            self._kind_sig = kind_sig
         self._slider_sig = sig
         self._curve_cache = None
         self._curve_sig = None
-        self._update_s_slider_range()
+        self._update_s_slider_range(center_s_for_joint=kind_changed)
 
     def _on_save(self, *_):
         dx = build_dist(self.x_kind.value, self._read_params("x"))
@@ -293,8 +413,8 @@ class ConvolutionVisualization:
         return sg, fs
 
     def _main_x_bounds(self, dx, dy, s: float) -> tuple[float, float]:
-        x_lo, x_hi = _finite_support(dx)
-        y_lo, y_hi = _finite_support(dy)
+        x_lo, x_hi = _display_support(dx)
+        y_lo, y_hi = _display_support(dy)
         k_lo, k_hi = s - y_hi, s - y_lo
         lo = min(x_lo, k_lo)
         hi = max(x_hi, k_hi)
@@ -305,8 +425,8 @@ class ConvolutionVisualization:
         return lo - pad, hi + pad
 
     def _joint_bounds(self, dx, dy) -> tuple[tuple[float, float], tuple[float, float]]:
-        x_lo, x_hi = _finite_support(dx)
-        y_lo, y_hi = _finite_support(dy)
+        x_lo, x_hi = _display_support(dx)
+        y_lo, y_hi = _display_support(dy)
         x_span = max(x_hi - x_lo, 1e-8)
         y_span = max(y_hi - y_lo, 1e-8)
 
@@ -326,7 +446,17 @@ class ConvolutionVisualization:
         return (x_lo - x_pad, x_hi + x_pad), (y_lo - y_pad, y_hi + y_pad)
 
     def _render(self, *_):
-        self._maybe_update_slider_bounds()
+        self._render_depth += 1
+        if self._render_depth > 1:
+            self._render_depth -= 1
+            return
+        try:
+            self._maybe_update_slider_bounds()
+            self._render_body()
+        finally:
+            self._render_depth -= 1
+
+    def _render_body(self) -> None:
         dx = build_dist(self.x_kind.value, self._read_params("x"))
         dy = build_dist(self.y_kind.value, self._read_params("y"))
         s = float(self.s_slider.value)
@@ -364,15 +494,26 @@ class ConvolutionVisualization:
             ax_joint = fig.add_subplot(gs[0, 1])
             ax_conv = fig.add_subplot(gs[1, 0])
 
-            ax_main.plot(xs, fx, color=COLOR_X, lw=2.4, label=r"$f_X(x)$")
-            ax_main.plot(xs, fy_at_x, color=COLOR_Y, lw=2.0, ls="-", alpha=0.85, label=r"$f_Y(x)$")
-            ax_main.plot(xs, fy_shift, color=COLOR_Y, lw=2.2, ls="--", label=r"$f_Y(s-x)$")
+            ax_main.plot(xs, fx, color=COLOR_X, lw=2.4, zorder=1, label=r"$f_X(x)$")
+            ax_main.plot(xs, fy_at_x, color=COLOR_Y, lw=2.0, ls="-", alpha=0.85, zorder=2, label=r"$f_Y(x)$")
+            ax_main.plot(xs, fy_shift, color=COLOR_Y, lw=2.2, ls="--", zorder=2, label=r"$f_Y(s-x)$")
 
             if self.plot_product.value:
-                ax_main.plot(xs, prod, color="#6A4C93", lw=2.0, label=r"$f_X(x)\,f_Y(s-x)$")
+                ax_main.plot(
+                    xs,
+                    prod,
+                    color=COLOR_PRODUCT,
+                    lw=4.0,
+                    ls="-",
+                    alpha=1.0,
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
+                    zorder=5,
+                    label=r"$f_X(x)\,f_Y(s-x)$",
+                )
 
             if self.compute_conv.value:
-                ax_main.fill_between(xs, 0.0, prod, color="#6A4C93", alpha=0.28)
+                ax_main.fill_between(xs, 0.0, prod, color=COLOR_PRODUCT, alpha=0.32, zorder=3)
 
             ymax = max(
                 float(np.nanmax(fx)),
@@ -393,7 +534,19 @@ class ConvolutionVisualization:
             ax_joint.contour(X, Y, Z, levels=10, colors="k", linewidths=0.35, alpha=0.55)
             fig.colorbar(cf, ax=ax_joint, fraction=0.046, pad=0.04, label=r"$f_X(x)\,f_Y(y)$")
             xs_line = np.array([jx_lo, jx_hi])
-            ax_joint.plot(xs_line, s - xs_line, color="#FFDD57", lw=2.2, ls="-", label=r"$y=s-x$")
+            ys_line = s - xs_line
+            # White halo so the line stays visible on both dark and light viridis bands
+            ax_joint.plot(xs_line, ys_line, color="white", lw=4.2, ls="-", solid_capstyle="round", zorder=9)
+            ax_joint.plot(
+                xs_line,
+                ys_line,
+                color=COLOR_JOINT_LINE,
+                lw=2.6,
+                ls="-",
+                solid_capstyle="round",
+                zorder=10,
+                label=r"$y=s-x$",
+            )
             ax_joint.set_xlim(jx_lo, jx_hi)
             ax_joint.set_ylim(jy_lo, jy_hi)
             ax_joint.set_aspect("auto")
@@ -435,10 +588,14 @@ class ConvolutionVisualization:
 
         if self.compute_conv.value:
             self.conv_readout.value = (
-                f"<b>Shaded area / convolution at <i>s</i> = {s:.6g}:</b> {cval:.8g}"
+                '<div style="font-size:18px;line-height:1.5;padding:14px 18px;background:linear-gradient(135deg,#e3f2fd 0%,#d4e9fc 100%);'
+                'border-radius:8px;border-left:6px solid #2E86AB;color:#0d2137;box-shadow:0 1px 3px rgba(0,0,0,0.08);">'
+                "<b>Shaded area / convolution</b><br/>"
+                f'<span style="font-size:16px;">at <i>s</i> = <span style="font-size:22px;font-weight:800;color:#0d3a5c;">{s:.6g}</span></span>'
+                f'<br/><span style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;">{cval:.8g}</span></div>'
             )
         else:
-            self.conv_readout.value = ""
+            self.conv_readout.value = _CONV_READOUT_PLACEHOLDER
 
 
     def display(self) -> None:
@@ -466,15 +623,47 @@ class ConvolutionVisualization:
             [controls_x, controls_y],
             layout=widgets.Layout(gap="14px", flex_wrap="wrap", align_items="flex-start"),
         )
-        row = widgets.HBox(
+        s_row = widgets.HBox(
+            [self._s_label, self.s_slider],
+            layout=widgets.Layout(
+                align_items="center",
+                gap="12px",
+                width="100%",
+                max_width="720px",
+                padding="6px 0 10px 0",
+            ),
+        )
+        toggles_row = widgets.HBox(
             [
-                self.s_slider,
-                self.plot_product,
-                self.compute_conv,
-                self.reveal_toggle,
+                self._plot_product_frame,
+                self._compute_conv_frame,
                 self.save_btn,
+                self.reveal_toggle,
             ],
-            layout=widgets.Layout(gap="8px", flex_wrap="wrap", align_items="center"),
+            layout=widgets.Layout(gap="10px", flex_wrap="wrap", align_items="center"),
+        )
+        interactive_panel = widgets.VBox(
+            [
+                widgets.HTML(
+                    '<div style="font-size:17px;font-weight:800;color:#0d3a5c;letter-spacing:0.01em;margin-bottom:2px;">'
+                    "Main controls</div>"
+                    '<div style="font-size:14px;color:#37474f;line-height:1.35;margin-bottom:4px;">'
+                    "Move <b>s</b>, then use <b>Plot product</b> and <b>Compute convolution</b> "
+                    "to see the integrand and its integral.</div>"
+                ),
+                s_row,
+                toggles_row,
+                self.conv_readout,
+            ],
+            layout=widgets.Layout(
+                border="solid 3px #2E86AB",
+                border_radius="10px",
+                padding="16px 20px 18px 20px",
+                margin="10px 0 18px 0",
+                width="fit-content",
+                max_width="960px",
+                background="#fafcfe",
+            ),
         )
         ui = widgets.VBox(
             [
@@ -483,8 +672,7 @@ class ConvolutionVisualization:
                     "and optionally show the product integral and the sum density."
                 ),
                 top,
-                row,
-                self.conv_readout,
+                interactive_panel,
                 self.out,
             ]
         )
