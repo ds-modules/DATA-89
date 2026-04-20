@@ -267,6 +267,7 @@ class ConvolutionVisualization:
         self._curve_sig = None
         self._slider_sig = None
         self._kind_sig: tuple[str, str] | None = None
+        self._main_xlim: tuple[float, float] | None = None
         self._render_depth = 0
 
         self.out = widgets.Output()
@@ -320,6 +321,26 @@ class ConvolutionVisualization:
         """Pick s so x + y = s meets the joint plot rectangle (same bounds as heatmap)."""
         (jx_lo, jx_hi), (jy_lo, jy_hi) = self._joint_bounds(dx, dy)
         return 0.5 * (jx_lo + jy_lo + jx_hi + jy_hi)
+
+    def _locked_main_x_bounds(self, dx, dy) -> tuple[float, float]:
+        """Stable x-window that keeps f_X(x), f_Y(x), and f_Y(s-x) visible over slider range."""
+        x_lo, x_hi = _display_support(dx)
+        y_lo, y_hi = _display_support(dy)
+
+        s_min = float(self.s_slider.min)
+        s_max = float(self.s_slider.max)
+        # Across s in [s_min, s_max], support of f_Y(s-x):
+        # x in [s_min - y_hi, s_max - y_lo]
+        k_lo = s_min - y_hi
+        k_hi = s_max - y_lo
+
+        lo = min(x_lo, y_lo, k_lo)
+        hi = max(x_hi, y_hi, k_hi)
+        if hi - lo < 1e-8:
+            mid = 0.5 * (lo + hi)
+            lo, hi = mid - 1.0, mid + 1.0
+        pad = 0.06 * (hi - lo)
+        return lo - pad, hi + pad
 
     def _update_s_slider_range(self, center_s_for_joint: bool = True) -> None:
         try:
@@ -385,6 +406,9 @@ class ConvolutionVisualization:
         self._curve_cache = None
         self._curve_sig = None
         self._update_s_slider_range(center_s_for_joint=kind_changed)
+        dx = build_dist(self.x_kind.value, self._read_params("x"))
+        dy = build_dist(self.y_kind.value, self._read_params("y"))
+        self._main_xlim = self._locked_main_x_bounds(dx, dy)
 
     def _on_save(self, *_):
         dx = build_dist(self.x_kind.value, self._read_params("x"))
@@ -412,17 +436,10 @@ class ConvolutionVisualization:
         self._curve_sig = sig
         return sg, fs
 
-    def _main_x_bounds(self, dx, dy, s: float) -> tuple[float, float]:
-        x_lo, x_hi = _display_support(dx)
-        y_lo, y_hi = _display_support(dy)
-        k_lo, k_hi = s - y_hi, s - y_lo
-        lo = min(x_lo, k_lo)
-        hi = max(x_hi, k_hi)
-        if hi - lo < 1e-8:
-            mid = 0.5 * (lo + hi)
-            lo, hi = mid - 1.0, mid + 1.0
-        pad = 0.03 * (hi - lo)
-        return lo - pad, hi + pad
+    def _main_x_bounds(self, dx, dy) -> tuple[float, float]:
+        if self._main_xlim is None:
+            self._main_xlim = self._locked_main_x_bounds(dx, dy)
+        return self._main_xlim
 
     def _joint_bounds(self, dx, dy) -> tuple[tuple[float, float], tuple[float, float]]:
         x_lo, x_hi = _display_support(dx)
@@ -461,7 +478,7 @@ class ConvolutionVisualization:
         dy = build_dist(self.y_kind.value, self._read_params("y"))
         s = float(self.s_slider.value)
 
-        x_lo, x_hi = self._main_x_bounds(dx, dy, s)
+        x_lo, x_hi = self._main_x_bounds(dx, dy)
         xs = np.linspace(x_lo, x_hi, 900)
         fx = dx.pdf(xs)
         fy_at_x = dy.pdf(xs)
@@ -623,6 +640,24 @@ class ConvolutionVisualization:
             [controls_x, controls_y],
             layout=widgets.Layout(gap="14px", flex_wrap="wrap", align_items="flex-start"),
         )
+        distribution_panel = widgets.VBox(
+            [
+                widgets.HTML(
+                    '<div style="font-size:17px;font-weight:800;color:#0d3a5c;letter-spacing:0.01em;margin-bottom:2px;">'
+                    "Distribution Controls</div>"
+                ),
+                top,
+            ],
+            layout=widgets.Layout(
+                border="solid 2px #8fb2cc",
+                border_radius="10px",
+                padding="14px 18px 14px 18px",
+                margin="8px 0 10px 0",
+                width="fit-content",
+                max_width="960px",
+                background="#fbfdff",
+            ),
+        )
         s_row = widgets.HBox(
             [self._s_label, self.s_slider],
             layout=widgets.Layout(
@@ -646,7 +681,7 @@ class ConvolutionVisualization:
             [
                 widgets.HTML(
                     '<div style="font-size:17px;font-weight:800;color:#0d3a5c;letter-spacing:0.01em;margin-bottom:2px;">'
-                    "Main controls</div>"
+                    "Convolution Controls</div>"
                     '<div style="font-size:14px;color:#37474f;line-height:1.35;margin-bottom:4px;">'
                     "Move <b>s</b>, then use <b>Plot product</b> and <b>Compute convolution</b> "
                     "to see the integrand and its integral.</div>"
@@ -671,7 +706,7 @@ class ConvolutionVisualization:
                     "<b>Convolution explorer</b> — choose <i>X</i> and <i>Y</i>, move <i>s</i>, "
                     "and optionally show the product integral and the sum density."
                 ),
-                top,
+                distribution_panel,
                 interactive_panel,
                 self.out,
             ]
