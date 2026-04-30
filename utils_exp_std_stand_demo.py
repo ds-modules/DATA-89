@@ -114,11 +114,6 @@ class ExpStdStandDemo:
         self.reveal_sd_button.on_click(self._toggle_sd)
         self.standardize_button.on_click(self._toggle_standardize)
 
-        if centrality_only:
-            # Per request: only allow reveal buttons (3) and (4).
-            self.reveal_mean_button.disabled = True
-            self.reveal_median_button.disabled = True
-
         self.info_html = widgets.HTML()
         self.output = widgets.Output()
 
@@ -177,6 +172,7 @@ class ExpStdStandDemo:
 
     def _toggle_standardize(self, _btn) -> None:
         self._standardized = not self._standardized
+        self.standardize_button.description = "Unstandardize" if self._standardized else "Standardize"
         self._render()
 
     def _display_range(self, dist) -> tuple[float, float]:
@@ -207,23 +203,36 @@ class ExpStdStandDemo:
         pdf = dist.pdf(xs)
 
         samples = dist.rvs(size=8000, random_state=123)
-        # Always draw histogram and density in original x; otherwise density=True
-        # rescales bar heights when bin widths change under z = (x - μ) / σ.
         hist_x = samples
         line_x = xs
+        line_y = pdf
         mean_x = mu
         median_x = median
         mad_band = (mu - mad, mu + mad)
         sd_band = (mu - sd, mu + sd)
+        xlim = (lo, hi)
 
         xlabel = r"$x$"
         xticks = None
         xticklabels = None
         if self._standardized and sd > 1e-12:
-            # Same plot as before; only tick positions/labels show μ + kσ in σ-units.
+            # True standardization view in z-units so the distribution moves and μ is centered.
+            hist_x = (samples - mu) / sd
+            line_x = (xs - mu) / sd
+            line_y = pdf * sd
+            mean_x = 0.0
+            median_x = (median - mu) / sd
+            mad_band = ((mu - mad - mu) / sd, (mu + mad - mu) / sd)
+            sd_band = ((mu - sd - mu) / sd, (mu + sd - mu) / sd)
+
+            # Keep base window from original quantiles, then center standardized window at 0.
+            lo_z = (lo - mu) / sd
+            hi_z = (hi - mu) / sd
+            half_span = max(abs(lo_z), abs(hi_z))
+            xlim = (-half_span, half_span)
+
             ks = np.arange(-3, 4, dtype=float)
-            xticks = (mu + ks * sd).tolist()
-            xticklabels = [
+            labels = [
                 r"$-3 \sigma$",
                 r"$-2 \sigma$",
                 r"$-1 \sigma$",
@@ -232,19 +241,19 @@ class ExpStdStandDemo:
                 r"$2 \sigma$",
                 r"$3 \sigma$",
             ]
-            xlabel = r"$x$ (tick marks at $\mu + k\sigma$)"
-            pairs = [(t, lab) for t, lab in zip(xticks, xticklabels, strict=True) if lo - 1e-9 <= t <= hi + 1e-9]
+            pairs = [(k, lab) for k, lab in zip(ks, labels, strict=True) if xlim[0] - 1e-9 <= k <= xlim[1] + 1e-9]
             if pairs:
                 xticks, xticklabels = zip(*pairs)
                 xticks, xticklabels = list(xticks), list(xticklabels)
             else:
                 xticks, xticklabels = None, None
+            xlabel = "Standard units"
 
         with self.output:
             self.output.clear_output(wait=True)
             fig, ax = plt.subplots(figsize=(10, 5))
             ax.hist(hist_x, bins=45, density=True, alpha=0.35, color=COLOR_HIST, edgecolor="white")
-            ax.plot(line_x, pdf, color=COLOR_DENSITY, lw=2.0, label="Density")
+            ax.plot(line_x, line_y, color=COLOR_DENSITY, lw=2.0, label="Density")
 
             if self._show_mad:
                 ax.axvspan(mad_band[0], mad_band[1], color=COLOR_MAD, alpha=0.25, label="μ ± MAD")
@@ -258,7 +267,7 @@ class ExpStdStandDemo:
             ax.set_title(f"Probability histogram: {self.dist_dropdown.value}")
             ax.set_ylabel("Density")
             ax.set_xlabel(xlabel)
-            ax.set_xlim(lo, hi)
+            ax.set_xlim(xlim[0], xlim[1])
             if xticks is not None:
                 ax.set_xticks(xticks)
                 ax.set_xticklabels(xticklabels)
@@ -281,14 +290,11 @@ class ExpStdStandDemo:
 
     def display(self) -> None:
         row1 = widgets.HBox([self.dist_dropdown, self.param_box], layout=widgets.Layout(gap="10px", flex_wrap="wrap"))
+        buttons = [self.reveal_mean_button, self.reveal_median_button]
+        if not self.centrality_only:
+            buttons.extend([self.reveal_mad_button, self.reveal_sd_button, self.standardize_button])
         row2 = widgets.HBox(
-            [
-                self.reveal_mean_button,
-                self.reveal_median_button,
-                self.reveal_mad_button,
-                self.reveal_sd_button,
-                self.standardize_button,
-            ],
+            buttons,
             layout=widgets.Layout(gap="8px", flex_wrap="wrap"),
         )
         ui = widgets.VBox([row1, row2, self.info_html, self.output])
