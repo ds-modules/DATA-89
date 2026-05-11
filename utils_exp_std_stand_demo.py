@@ -9,8 +9,33 @@ from IPython.display import display
 from scipy import stats
 
 
-DIST_OPTIONS = ("uniform", "exponential", "pareto", "beta", "gamma", "normal")
+DIST_OPTIONS = (
+    "uniform",
+    "exponential",
+    "pareto",
+    "beta",
+    "gamma",
+    "normal",
+    "binomial",
+    "poisson",
+    "geometric",
+    "negative_binomial",
+    "hypergeometric",
+    "discrete_uniform",
+)
 TEXTBOOK_DIST_OPTIONS = ("uniform", "exponential", "normal")
+
+# Distributions that use a PMF on integers (not a continuous PDF on R).
+DISCRETE_NAMES = frozenset(
+    {
+        "binomial",
+        "poisson",
+        "geometric",
+        "negative_binomial",
+        "hypergeometric",
+        "discrete_uniform",
+    }
+)
 
 # Plot elements — buttons use the same accent (border) with a light matching fill.
 COLOR_HIST = "#4C78A8"
@@ -35,13 +60,20 @@ def _accent_button(description: str, accent_hex: str, fill_hex: str) -> widgets.
         layout=widgets.Layout(border=f"2px solid {accent_hex}", **_BTN_LAYOUT),
     )
 
-DIST_PARAM_SPECS: dict[str, list[tuple[str, float]]] = {
+# Parameter rows: (name, default) for floats, or (name, default, "int") for integers.
+DIST_PARAM_SPECS: dict[str, list[tuple]] = {
     "uniform": [("low", 0.0), ("high", 1.0)],
     "exponential": [("scale", 1.0)],
     "pareto": [("shape", 2.5), ("scale", 1.0)],
     "beta": [("alpha", 2.0), ("beta", 2.0)],
     "gamma": [("shape", 2.0), ("scale", 1.0)],
     "normal": [("mean", 0.0), ("std", 1.0)],
+    "binomial": [("n", 20, "int"), ("p", 0.4)],
+    "poisson": [("mu", 3.0)],
+    "geometric": [("p", 0.35)],
+    "negative_binomial": [("n", 5, "int"), ("p", 0.4)],
+    "hypergeometric": [("M", 50, "int"), ("n", 20, "int"), ("N", 10, "int")],
+    "discrete_uniform": [("low", 0, "int"), ("high", 10, "int")],
 }
 
 
@@ -71,6 +103,36 @@ def _build_dist(name: str, params: dict[str, float]):
         mean = float(params["mean"])
         std = max(float(params["std"]), 1e-8)
         return stats.norm(loc=mean, scale=std)
+    if name == "binomial":
+        n = max(int(round(params["n"])), 1)
+        p = float(params["p"])
+        p = min(max(p, 1e-12), 1.0 - 1e-12)
+        return stats.binom(n, p)
+    if name == "poisson":
+        mu = max(float(params["mu"]), 1e-12)
+        return stats.poisson(mu)
+    if name == "geometric":
+        p = float(params["p"])
+        p = min(max(p, 1e-12), 1.0 - 1e-12)
+        return stats.geom(p)
+    if name == "negative_binomial":
+        n = max(int(round(params["n"])), 1)
+        p = float(params["p"])
+        p = min(max(p, 1e-12), 1.0 - 1e-12)
+        return stats.nbinom(n, p)
+    if name == "hypergeometric":
+        M = max(int(round(params["M"])), 1)
+        n = int(round(params["n"]))
+        N = int(round(params["N"]))
+        n = min(max(n, 0), M)
+        N = min(max(N, 0), M)
+        return stats.hypergeom(M, n, N)
+    if name == "discrete_uniform":
+        low = int(round(params["low"]))
+        high = int(round(params["high"]))
+        if high <= low + 1:
+            high = low + 2
+        return stats.randint(low, high)
     raise ValueError(f"Unknown distribution {name!r}")
 
 
@@ -93,7 +155,7 @@ class ExpStdStandDemo:
             layout=widgets.Layout(width="240px"),
         )
 
-        self.param_widgets: dict[str, widgets.FloatText] = {}
+        self.param_widgets: dict[str, widgets.Widget] = {}
         self.param_box = widgets.HBox([])
         self._build_param_widgets()
         self.dist_dropdown.observe(self._on_dist_change, names="value")
@@ -130,15 +192,26 @@ class ExpStdStandDemo:
         specs = DIST_PARAM_SPECS[self.dist_dropdown.value]
         self.param_widgets = {}
         children = []
-        for name, default in specs:
-            field = widgets.FloatText(
-                value=default,
-                description=f"{name}:",
-                style={"description_width": "70px"},
-                layout=widgets.Layout(width="170px"),
-            )
+        for spec in specs:
+            pname = spec[0]
+            default = spec[1]
+            kind = spec[2] if len(spec) > 2 else "float"
+            if kind == "int":
+                field = widgets.IntText(
+                    value=int(default),
+                    description=f"{pname}:",
+                    style={"description_width": "70px"},
+                    layout=widgets.Layout(width="170px"),
+                )
+            else:
+                field = widgets.FloatText(
+                    value=float(default),
+                    description=f"{pname}:",
+                    style={"description_width": "70px"},
+                    layout=widgets.Layout(width="170px"),
+                )
             field.observe(self._render, names="value")
-            self.param_widgets[name] = field
+            self.param_widgets[pname] = field
             children.append(field)
         self.param_box.children = tuple(children)
 
@@ -151,8 +224,11 @@ class ExpStdStandDemo:
         self._build_param_widgets()
         self._render()
 
-    def _params(self) -> dict[str, float]:
-        return {k: float(v.value) for k, v in self.param_widgets.items()}
+    def _params(self) -> dict[str, float | int]:
+        out: dict[str, float | int] = {}
+        for k, v in self.param_widgets.items():
+            out[k] = int(v.value) if isinstance(v, widgets.IntText) else float(v.value)
+        return out
 
     def _toggle_mean(self, _btn) -> None:
         self._show_mean = not self._show_mean
@@ -199,13 +275,32 @@ class ExpStdStandDemo:
         mad = float(np.mean(np.abs(dist.rvs(size=60000, random_state=17) - mu)))
 
         lo, hi = self._display_range(dist)
-        xs = np.linspace(lo, hi, 900)
-        pdf = dist.pdf(xs)
+        is_discrete = self.dist_dropdown.value in DISCRETE_NAMES
+
+        if is_discrete:
+            k_lo = int(np.ceil(float(dist.ppf(0.001))))
+            k_hi = int(np.floor(float(dist.ppf(0.999))))
+            a = int(dist.a) if np.isfinite(dist.a) else k_lo
+            b = int(dist.b) if np.isfinite(dist.b) else k_hi
+            k_lo = max(k_lo, a)
+            k_hi = min(k_hi, b)
+            if k_hi < k_lo:
+                km = int(round(mu)) if np.isfinite(mu) else a
+                k_lo, k_hi = km - 5, km + 5
+                k_lo = max(k_lo, a)
+                k_hi = min(k_hi, b)
+            ks = np.arange(k_lo, k_hi + 1, dtype=float)
+            if ks.size == 0:
+                ks = np.arange(a, min(a + 10, b) + 1, dtype=float)
+            line_x = ks
+            line_y = dist.pmf(ks)
+        else:
+            xs = np.linspace(lo, hi, 900)
+            line_x = xs
+            line_y = dist.pdf(xs)
 
         samples = dist.rvs(size=8000, random_state=123)
         hist_x = samples
-        line_x = xs
-        line_y = pdf
         mean_x = mu
         median_x = median
         mad_band = (mu - mad, mu + mad)
@@ -218,16 +313,16 @@ class ExpStdStandDemo:
         if self._standardized and sd > 1e-12:
             # True standardization view in z-units so the distribution moves and μ is centered.
             hist_x = (samples - mu) / sd
-            line_x = (xs - mu) / sd
-            line_y = pdf * sd
+            line_x = (line_x - mu) / sd
+            line_y = line_y * sd
             mean_x = 0.0
             median_x = (median - mu) / sd
             mad_band = ((mu - mad - mu) / sd, (mu + mad - mu) / sd)
             sd_band = ((mu - sd - mu) / sd, (mu + sd - mu) / sd)
 
             # Keep base window from original quantiles, then center standardized window at 0.
-            lo_z = (lo - mu) / sd
-            hi_z = (hi - mu) / sd
+            lo_z = (float(lo) - mu) / sd
+            hi_z = (float(hi) - mu) / sd
             half_span = max(abs(lo_z), abs(hi_z))
             xlim = (-half_span, half_span)
 
@@ -252,8 +347,22 @@ class ExpStdStandDemo:
         with self.output:
             self.output.clear_output(wait=True)
             fig, ax = plt.subplots(figsize=(10, 5))
-            ax.hist(hist_x, bins=45, density=True, alpha=0.35, color=COLOR_HIST, edgecolor="white")
-            ax.plot(line_x, line_y, color=COLOR_DENSITY, lw=2.0, label="Density")
+            if is_discrete and not self._standardized:
+                smin, smax = float(np.min(samples)), float(np.max(samples))
+                k0 = float(line_x[0]) if line_x.size else smin
+                k1 = float(line_x[-1]) if line_x.size else smax
+                pad_lo = min(smin, k0)
+                pad_hi = max(smax, k1)
+                hist_bins = np.arange(pad_lo - 0.5, pad_hi + 1.5, 1.0)
+            else:
+                hist_bins = 45
+            curve_label = "PMF" if is_discrete else "Density"
+            ax.hist(hist_x, bins=hist_bins, density=True, alpha=0.35, color=COLOR_HIST, edgecolor="white")
+            plot_kw: dict = {"color": COLOR_DENSITY, "lw": 2.0, "label": curve_label}
+            if is_discrete:
+                plot_kw["marker"] = "o"
+                plot_kw["ms"] = 4
+            ax.plot(line_x, line_y, **plot_kw)
 
             if self._show_mad:
                 ax.axvspan(mad_band[0], mad_band[1], color=COLOR_MAD, alpha=0.25, label="μ ± MAD")
