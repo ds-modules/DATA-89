@@ -895,8 +895,9 @@ class DistributionProbabilityVisualization:
             # Create empty figure (single plot)
             fig = go.Figure()
             # Set default axis ranges for blank plot
+            y_title = "P(X = x)" if self.category_dropdown.value == "Discrete" else "Density"
             fig.update_xaxes(title_text="x", range=[-5, 5])
-            fig.update_yaxes(title_text="Density", range=[0, 1])
+            fig.update_yaxes(title_text=y_title, range=[0, 1])
             fig.update_layout(height=600, showlegend=True, title="Histogram of Samples and PDF/PMF")
             fig.show()
             
@@ -1196,8 +1197,9 @@ class DistributionProbabilityVisualization:
                     ))
             
             # Update layout (single plot)
+            y_title = "P(X = x)" if dist_category == "Discrete" else "Density"
             fig.update_xaxes(title_text="x")
-            fig.update_yaxes(title_text="Density")
+            fig.update_yaxes(title_text=y_title)
             fig.update_layout(height=600, showlegend=True, title="Histogram of Samples and PDF/PMF")
             
             # Compute probabilities (only if prob_type is not empty)
