@@ -344,9 +344,9 @@ class DistributionProbabilityVisualization:
             widgets.IntSlider(value=10, min=1, max=50, step=1, description='nsample:', style={'description_width': 'initial'})
         ]
         
-        # Sample size
+        # Sample size (allow small draws like 5–10 as well as large Monte Carlo samples)
         self.n_samples_slider = widgets.IntSlider(
-            value=1000, min=100, max=10000, step=100,
+            value=1000, min=5, max=10000, step=5,
             description="Samples:",
             style={'description_width': 'initial'}
         )
@@ -363,18 +363,18 @@ class DistributionProbabilityVisualization:
             button_style='warning'
         )
         
-        # Show PDF/PMF button (disabled initially)
+        # Show PDF/PMF button (available before samples are drawn)
         self.show_pdf_button = widgets.Button(
             description="Show PDF/PMF",
             button_style='info',
-            disabled=True  # Disabled until samples are drawn
+            disabled=False
         )
         
-        # Show Shaded Region button (disabled initially)
+        # Show Shaded Region button (shaded region follows probability type selection)
         self.show_shaded_region_button = widgets.Button(
             description="Display Shaded Region",
             button_style='primary',
-            disabled=True  # Disabled until samples are drawn
+            disabled=False
         )
         
         # Probability calculation dropdown
@@ -414,7 +414,7 @@ class DistributionProbabilityVisualization:
         # Slider container (will be dynamically updated based on prob_type)
         self.slider_container = widgets.VBox([self.bound1_slider, self.bound2_slider])
         
-        # Probability controls container (initially hidden)
+        # Probability controls (always visible so PDF/PMF can be shown before sampling)
         self.prob_controls_container = widgets.VBox([
             widgets.HTML("<hr>"),
             self.prob_type_dropdown,
@@ -423,11 +423,10 @@ class DistributionProbabilityVisualization:
             widgets.HTML("<hr>"),
             self.prob_label
         ])
-        # Initially hide the probability controls
-        self.prob_controls_container.layout.display = 'none'
         
         # Initialize slider visibility based on default prob_type
         self._update_slider_visibility()
+        self._update_bound_sliders()
         
     def _setup_callbacks(self):
         """Setup widget callbacks"""
@@ -449,17 +448,17 @@ class DistributionProbabilityVisualization:
         self.bound2_slider.observe(self._on_bound_change, names='value')
         
     def _on_bound_change(self, change):
-        """Handle bound slider changes - only update plot if samples exist"""
+        """Handle bound slider changes"""
         self.bounds_interacted = True  # User has interacted with bounds
-        if len(self.samples) > 0:
+        if len(self.samples) > 0 or self.show_pdf_flag:
             self._update_plot()
         
     def _on_param_change(self, change):
-        """Handle parameter changes - only update plot if samples exist"""
-        # For Poisson and Binomial, always update sliders when parameters change (even without samples)
-        if self.dist_dropdown.value in ["Poisson", "Binomial"]:
+        """Handle parameter changes"""
+        # Keep bound/slider ranges in sync when theoretical support changes
+        if self.dist_dropdown.value in ["Poisson", "Binomial"] or self.show_pdf_flag:
             self._update_bound_sliders()
-        if len(self.samples) > 0:
+        if len(self.samples) > 0 or self.show_pdf_flag:
             self._update_plot()
         
     def _on_category_change(self, change):
@@ -473,20 +472,19 @@ class DistributionProbabilityVisualization:
         self._update_param_widgets()
         # Reset probability type dropdown to empty
         self.prob_type_dropdown.value = ""
-        # Clear samples and show blank plot
+        # Clear samples; keep PDF/PMF controls available
         self.samples = np.array([])
         self.show_pdf_flag = False
-        self.show_pdf_button.disabled = True
+        self.show_pdf_button.disabled = False
         self.show_pdf_button.description = "Show PDF/PMF"
         self.show_shaded_region_flag = False
-        self.show_shaded_region_button.disabled = True
+        self.show_shaded_region_button.disabled = False
         self.show_shaded_region_button.description = "Display Shaded Region"
         # Reset bounds interaction flag - histogram will be all blue until user interacts
         self.bounds_interacted = False
         # Reset status
         self.status_html.value = "Ready to draw samples."
-        # Hide probability controls
-        self.prob_controls_container.layout.display = 'none'
+        self._update_bound_sliders()
         self._show_blank_plot()
         
     def _on_dist_change(self, change):
@@ -494,23 +492,19 @@ class DistributionProbabilityVisualization:
         self._update_param_widgets()
         # Reset probability type dropdown to empty
         self.prob_type_dropdown.value = ""
-        # Clear samples and show blank plot
+        # Clear samples; keep PDF/PMF controls available
         self.samples = np.array([])
         self.show_pdf_flag = False
-        self.show_pdf_button.disabled = True
+        self.show_pdf_button.disabled = False
         self.show_pdf_button.description = "Show PDF/PMF"
         self.show_shaded_region_flag = False
-        self.show_shaded_region_button.disabled = True
+        self.show_shaded_region_button.disabled = False
         self.show_shaded_region_button.description = "Display Shaded Region"
         # Reset bounds interaction flag - histogram will be all blue until user interacts
         self.bounds_interacted = False
         # Reset status
         self.status_html.value = "Ready to draw samples."
-        # For Poisson, Bernoulli, and Binomial, update sliders immediately (even without samples)
-        if self.dist_dropdown.value in ["Poisson", "Bernoulli", "Binomial"]:
-            self._update_bound_sliders()
-        # Hide probability controls
-        self.prob_controls_container.layout.display = 'none'
+        self._update_bound_sliders()
         self._show_blank_plot()
         
     def _on_reset_clicked(self, button):
@@ -518,18 +512,23 @@ class DistributionProbabilityVisualization:
         # Clear samples
         self.samples = np.array([])
         
-        # Reset PDF flag and button
+        # Reset PDF flag and button (still available without samples)
         self.show_pdf_flag = False
-        self.show_pdf_button.disabled = True
+        self.show_pdf_button.disabled = False
         self.show_pdf_button.description = "Show PDF/PMF"
         
         # Reset shaded region flag and button
         self.show_shaded_region_flag = False
-        self.show_shaded_region_button.disabled = True
+        self.show_shaded_region_button.disabled = False
         self.show_shaded_region_button.description = "Display Shaded Region"
         
         # Reset bounds interaction flag
         self.bounds_interacted = False
+        
+        # Reset probability type
+        self.prob_type_dropdown.value = ""
+        self._update_slider_visibility()
+        self._update_bound_sliders()
         
         # Reset probability label
         self.prob_label.value = '<div style="font-size: 18px; padding: 10px; background-color: #f0f0f0; border: 2px solid #333; border-radius: 5px;"><b>Estimated Probability:</b> <span style="color: #0066cc; font-size: 20px; font-weight: bold;">N/A</span><br><b>True Probability:</b> <span style="color: #cc6600; font-size: 20px; font-weight: bold;">N/A</span></div>'
@@ -537,25 +536,26 @@ class DistributionProbabilityVisualization:
         # Reset status
         self.status_html.value = "Ready to draw samples."
         
-        # Hide probability controls
-        self.prob_controls_container.layout.display = 'none'
-        
         # Show blank plot
         self._show_blank_plot()
         
     def _on_show_pdf_clicked(self, button):
-        """Handle Show PDF/PMF button click"""
-        if len(self.samples) > 0:
-            self.show_pdf_flag = not self.show_pdf_flag
-            if self.show_pdf_flag:
-                self.show_pdf_button.description = "Hide PDF/PMF"
-            else:
-                self.show_pdf_button.description = "Show PDF/PMF"
+        """Handle Show PDF/PMF button click (works with or without samples)"""
+        self.show_pdf_flag = not self.show_pdf_flag
+        if self.show_pdf_flag:
+            self.show_pdf_button.description = "Hide PDF/PMF"
+            self._update_bound_sliders()
             self._update_plot()
+        else:
+            self.show_pdf_button.description = "Show PDF/PMF"
+            if len(self.samples) > 0:
+                self._update_plot()
+            else:
+                self._show_blank_plot()
     
     def _on_show_shaded_region_clicked(self, button):
         """Handle Show Shaded Region button click"""
-        if len(self.samples) > 0:
+        if len(self.samples) > 0 or self.show_pdf_flag:
             self.show_shaded_region_flag = not self.show_shaded_region_flag
             if self.show_shaded_region_flag:
                 self.show_shaded_region_button.description = "Hide Shaded Region"
@@ -616,7 +616,7 @@ class DistributionProbabilityVisualization:
             # Update bound sliders to set proper ranges and default values
             # This will set bounds to full range (x_min to x_max) for the distribution
             self._update_bound_sliders(reset_to_full_range=True)
-        if len(self.samples) > 0:
+        if len(self.samples) > 0 or self.show_pdf_flag:
             self._update_plot()
         
     def _on_draw_clicked(self, button):
@@ -633,6 +633,9 @@ class DistributionProbabilityVisualization:
         
         # Progressive visualization
         self.status_html.value = "Generating samples..."
+        
+        # Preserve PDF visibility if the student already turned it on
+        keep_pdf = self.show_pdf_flag
         
         sample_index = 0
         batch_count = 0
@@ -651,10 +654,9 @@ class DistributionProbabilityVisualization:
                     self._update_bound_sliders(reset_to_full_range=True)
                 else:
                     self._update_bound_sliders()
-                # Enable the Show PDF/PMF button
                 self.show_pdf_button.disabled = False
-                self.show_pdf_flag = False  # Reset to not showing PDF initially
-                self.show_pdf_button.description = "Show PDF/PMF"
+                self.show_pdf_flag = keep_pdf
+                self.show_pdf_button.description = "Hide PDF/PMF" if keep_pdf else "Show PDF/PMF"
                 # Automatically show shaded region if prob_type is selected
                 if self.prob_type_dropdown.value != "":
                     self.show_shaded_region_flag = True
@@ -662,15 +664,13 @@ class DistributionProbabilityVisualization:
                     self.show_shaded_region_flag = False
                 # Update slider visibility based on current prob_type
                 self._update_slider_visibility()
-                # Show probability controls
-                self.prob_controls_container.layout.display = 'flex'
             
             # Update plot less frequently to speed up animation
             # Update every batch for first 100 samples, then every 2 batches
             should_update_plot = (sample_index < 100) or (batch_count % 2 == 0)
             
             if should_update_plot:
-                self._update_plot()  # Uses instance flags (both PDF and shaded region off initially)
+                self._update_plot()
             
             # Always update status
             self.status_html.value = f"Generated {end_index} / {n_total} samples"
@@ -686,62 +686,96 @@ class DistributionProbabilityVisualization:
         # Final update with all samples
         self.samples = all_samples
         self._update_bound_sliders()  # Update sliders to match full sample range
-        self._update_plot()  # Uses instance flags (both PDF and shaded region off initially)
+        self._update_plot()
         self.status_html.value = f"Complete! Generated {n_total} samples."
     
+    def _get_theoretical_x_range(self, params=None):
+        """Return a reasonable x-range covering most of the current distribution's mass."""
+        dist_type = self.dist_dropdown.value
+        if params is None:
+            params = self._get_params_dict()
+
+        if dist_type == "Uniform":
+            low = params.get('low', 0)
+            high = params.get('high', 1)
+            return float(min(low, high)), float(max(low, high))
+        if dist_type == "Exponential":
+            scale = params.get('scale', 1)
+            return 0.0, float(max(scale * 5, 1))
+        if dist_type == "Pareto":
+            scale = params.get('scale', 1.0)
+            return float(scale), float(scale + 5.0)
+        if dist_type == "Beta":
+            return 0.0, 1.0
+        if dist_type == "Gamma":
+            shape = params.get('shape', 2)
+            scale = params.get('scale', 1)
+            return 0.0, float(max(shape * scale * 5, 1))
+        if dist_type == "Normal":
+            mean = params.get('mean', 0)
+            std = max(params.get('std', 1), 1e-6)
+            return float(mean - 4 * std), float(mean + 4 * std)
+        if dist_type == "Bernoulli":
+            return 0, 1
+        if dist_type == "Geometric":
+            p = max(params.get('p', 0.5), 0.01)
+            return 1, int(max(15, stats.geom.ppf(0.99, p)))
+        if dist_type == "Binomial":
+            return 0, int(params.get('n', 10))
+        if dist_type == "Poisson":
+            lam = params.get('lam', 5)
+            return 0, int(max(lam * 3, lam + 4 * np.sqrt(lam) + 1, 5))
+        if dist_type == "Hypergeometric":
+            ngood = int(params.get('ngood', 10))
+            nsample = int(params.get('nsample', 10))
+            return 0, min(nsample, ngood)
+        return -5.0, 5.0
+
     def _get_x_axis_range(self):
-        """Get the x-axis range for the plot (used by both plot and sliders)"""
+        """Get the x-axis range for the plot (used by both plot and sliders).
+
+        When PDF/PMF is shown, the range is the union of the sample extent and the
+        current theoretical support so neither leaves the window after parameter changes.
+        """
         dist_type = self.dist_dropdown.value
         dist_category = self.category_dropdown.value
-        
-        # Special handling for Poisson - use range [0, lambda * 3]
-        if dist_type == "Poisson":
-            if dist_type in self.param_widgets:
-                lambda_val = self.param_widgets['Poisson'][0].value
-                x_min = 0
-                x_max = int(lambda_val * 3)
+        params = self._get_params_dict()
+        theo_min, theo_max = self._get_theoretical_x_range(params)
+
+        if len(self.samples) > 0:
+            sample_min = float(np.min(self.samples))
+            sample_max = float(np.max(self.samples))
+            if self.show_pdf_flag:
+                # Fit both samples and the updated theoretical PDF/PMF
+                pad = 1.0 if dist_category == "Discrete" else 0.5
+                x_min = min(sample_min, theo_min) - pad
+                x_max = max(sample_max, theo_max) + pad
+            elif dist_type == "Pareto":
+                x_min = theo_min
+                x_max = theo_max
             else:
-                x_min = 0
-                x_max = 15  # Default if lambda widget not found
-        # Special handling for Bernoulli - use range [0, 1]
-        elif dist_type == "Bernoulli":
-            x_min = 0
-            x_max = 1
-        # Special handling for Binomial when no samples - use range based on n parameter
-        elif dist_type == "Binomial" and len(self.samples) == 0:
-            if dist_type in self.param_widgets:
-                n_val = self.param_widgets['Binomial'][0].value
-                x_min = 0
-                x_max = int(n_val)  # Binomial range is [0, n]
-            else:
-                x_min = 0
-                x_max = 10  # Default if n widget not found
-        elif len(self.samples) > 0:
-            # Special handling for Pareto distribution - use focused range based on scale
-            if dist_type == "Pareto":
-                scale = self.param_widgets['Pareto'][1].value if 'Pareto' in self.param_widgets else 1.0
-                x_min = scale
-                x_max = scale + 5.0  # Show a reasonable range above the minimum
-            else:
-                x_min = float(np.min(self.samples)) - 1
-                x_max = float(np.max(self.samples)) + 1
+                pad = 1.0 if dist_category == "Discrete" else 1.0
+                x_min = sample_min - pad
+                x_max = sample_max + pad
         else:
-            # Default range when no samples
-            x_min, x_max = -5, 5
-        
-        # For discrete, ensure we cover integer values and add more padding to capture tail
-        if dist_category == "Discrete" and dist_type not in ["Poisson", "Bernoulli", "Binomial"]:
-            x_min = max(x_min, 0)
-            x_min = int(x_min)
-            # Add extra padding for discrete to better capture distribution tail
-            # Use 20% more range or at least 3 extra units, whichever is larger
-            range_padding = max(int((x_max - x_min) * 0.2), 3)
-            x_max = int(x_max) + range_padding
-        elif dist_type == "Binomial":
-            # Ensure integer values for Binomial
-            x_min = int(x_min)
-            x_max = int(x_max)
-        
+            x_min, x_max = theo_min, theo_max
+
+        if dist_category == "Discrete":
+            x_min = max(int(np.floor(x_min)), 0) if dist_type != "Bernoulli" else 0
+            if dist_type == "Bernoulli":
+                x_min, x_max = 0, 1
+            elif dist_type == "Binomial":
+                x_min = 0
+                x_max = int(max(x_max, params.get('n', 10)))
+            else:
+                x_max = int(np.ceil(x_max))
+                if not self.show_pdf_flag and dist_type not in ["Poisson", "Bernoulli", "Binomial"]:
+                    range_padding = max(int((x_max - x_min) * 0.2), 3)
+                    x_max = x_max + range_padding
+
+        if x_min >= x_max:
+            x_max = x_min + 1
+
         return x_min, x_max
         
     def _update_bound_sliders(self, reset_to_full_range=False):
@@ -894,19 +928,23 @@ class DistributionProbabilityVisualization:
             clear_output(wait=True)
             # Create empty figure (single plot)
             fig = go.Figure()
-            # Set default axis ranges for blank plot
+            # Set default axis ranges for blank plot from current distribution support
             y_title = "P(X = x)" if self.category_dropdown.value == "Discrete" else "Density"
-            fig.update_xaxes(title_text="x", range=[-5, 5])
+            x_min, x_max = self._get_theoretical_x_range()
+            if x_min >= x_max:
+                x_max = x_min + 1
+            fig.update_xaxes(title_text="x", range=[x_min, x_max])
             fig.update_yaxes(title_text=y_title, range=[0, 1])
-            fig.update_layout(height=600, showlegend=True, title="Histogram of Samples and PDF/PMF")
+            fig.update_layout(height=600, showlegend=True, title="Select Show PDF/PMF or Draw Samples")
             fig.show()
             
             # Reset probability label
             self.prob_label.value = '<div style="font-size: 18px; padding: 10px; background-color: #f0f0f0; border: 2px solid #333; border-radius: 5px;"><b>Estimated Probability:</b> <span style="color: #0066cc; font-size: 20px; font-weight: bold;">N/A</span><br><b>True Probability:</b> <span style="color: #cc6600; font-size: 20px; font-weight: bold;">N/A</span></div>'
     
     def _update_plot(self, change=None):
-        """Update the plot with histogram and overlaid PDF/PMF"""
-        if len(self.samples) == 0:
+        """Update the plot with histogram and/or overlaid PDF/PMF"""
+        # Allow PDF/PMF-only view before any samples are drawn
+        if len(self.samples) == 0 and not self.show_pdf_flag:
             self._show_blank_plot()
             return
         
@@ -1196,11 +1234,31 @@ class DistributionProbabilityVisualization:
                         showlegend=False
                     ))
             
-            # Update layout (single plot)
+            # Update layout (single plot): fit both samples and PDF/PMF in the window
             y_title = "P(X = x)" if dist_category == "Discrete" else "Density"
-            fig.update_xaxes(title_text="x")
-            fig.update_yaxes(title_text=y_title)
-            fig.update_layout(height=600, showlegend=True, title="Histogram of Samples and PDF/PMF")
+
+            max_hist = 0
+            if len(self.samples) > 0:
+                if dist_category == "Discrete":
+                    _, hist_counts = np.unique(self.samples, return_counts=True)
+                    hist_counts = hist_counts / len(self.samples)
+                    max_hist = float(np.max(hist_counts)) if len(hist_counts) > 0 else 0
+                else:
+                    n_bins = 50
+                    hist_counts, _ = np.histogram(self.samples, bins=n_bins, range=(x_min, x_max), density=True)
+                    max_hist = float(np.max(hist_counts)) if len(hist_counts) > 0 else 0
+            max_pdf = float(np.max(pdf_pmf_values)) if pdf_pmf_values is not None and len(pdf_pmf_values) > 0 else 0
+            y_max = max(max_hist, max_pdf, 0.1) * 1.15
+
+            fig.update_xaxes(title_text="x", range=[x_min, x_max])
+            fig.update_yaxes(title_text=y_title, range=[0, y_max])
+            if len(self.samples) > 0 and show_pdf:
+                plot_title = "Histogram of Samples and PDF/PMF"
+            elif len(self.samples) > 0:
+                plot_title = "Histogram of Samples"
+            else:
+                plot_title = "PDF/PMF"
+            fig.update_layout(height=600, showlegend=True, title=plot_title)
             
             # Compute probabilities (only if prob_type is not empty)
             if prob_type == "":
@@ -1212,21 +1270,27 @@ class DistributionProbabilityVisualization:
                     '</div>'
                 )
             else:
-                est_prob = compute_estimated_probability(self.samples, prob_type, bound1, bound2)
+                has_samples = len(self.samples) > 0
+                est_text = (
+                    f'{compute_estimated_probability(self.samples, prob_type, bound1, bound2):.4f}'
+                    if has_samples else 'N/A (draw samples to estimate)'
+                )
+                est_style = (
+                    'color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;'
+                    if has_samples else 'color: #999; font-size: 16px;'
+                )
                 if show_pdf:
                     true_prob = compute_true_probability(dist_type, dist_category, prob_type, bound1, bound2, **params)
-                    # Update probability label
                     self.prob_label.value = (
                         f'<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
-                        f'<b>Estimated Probability (from samples):</b> <span style="color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{est_prob:.4f}</span><br><br>'
+                        f'<b>Estimated Probability (from samples):</b> <span style="{est_style}">{est_text}</span><br><br>'
                         f'<b>True Probability (from {("CDF" if dist_category == "Continuous" else "PMF")}):</b> <span style="color: #cc6600; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{true_prob:.4f}</span>'
                         f'</div>'
                     )
                 else:
-                    # Only show estimated probability when PDF is not shown
                     self.prob_label.value = (
                         f'<div style="font-size: 18px; padding: 12px; background-color: #e8f4f8; border: 3px solid #0066cc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">'
-                        f'<b>Estimated Probability (from samples):</b> <span style="color: #0066cc; font-size: 22px; font-weight: bold; background-color: white; padding: 4px 8px; border-radius: 4px;">{est_prob:.4f}</span><br><br>'
+                        f'<b>Estimated Probability (from samples):</b> <span style="{est_style}">{est_text}</span><br><br>'
                         f'<b>True Probability:</b> <span style="color: #999; font-size: 16px;">N/A (click "Show PDF/PMF" to see comparison)</span>'
                         f'</div>'
                     )
@@ -1249,7 +1313,7 @@ class DistributionProbabilityVisualization:
             self.n_samples_slider,
             widgets.HBox([self.draw_button, self.reset_button]),  # Buttons side by side
             self.status_html,  # Status display for animation progress
-            self.prob_controls_container  # Probability controls (initially hidden, includes show_pdf_button)
+            self.prob_controls_container  # Probability controls (available before sampling)
         ])
         
         display(widgets.HBox([controls, self.plot_output]))
