@@ -351,15 +351,15 @@ class DistributionProbabilityVisualization:
             style={'description_width': 'initial'}
         )
 
-        # Bin width for continuous sample histograms
-        self.bin_width_slider = widgets.FloatSlider(
-            value=0.05, min=0.01, max=2.0, step=0.01,
-            description="Bin width:",
+        # Number of bins for continuous sample histograms
+        self.n_bins_slider = widgets.IntSlider(
+            value=20, min=1, max=100, step=1,
+            description="Bins:",
             style={'description_width': 'initial'},
             continuous_update=False
         )
         # Hidden for discrete (integer outcomes use one bar per value)
-        self.bin_width_slider.layout.display = 'none'
+        self.n_bins_slider.layout.display = 'none'
         
         # Draw samples button
         self.draw_button = widgets.Button(
@@ -454,12 +454,12 @@ class DistributionProbabilityVisualization:
                 w.observe(self._on_param_change, names='value')
         
         self.n_samples_slider.observe(self._on_param_change, names='value')
-        self.bin_width_slider.observe(self._on_bin_width_change, names='value')
+        self.n_bins_slider.observe(self._on_n_bins_change, names='value')
         self.bound1_slider.observe(self._on_bound_change, names='value')
         self.bound2_slider.observe(self._on_bound_change, names='value')
         
-    def _on_bin_width_change(self, change):
-        """Redraw histogram when bin width changes (continuous samples only)."""
+    def _on_n_bins_change(self, change):
+        """Redraw histogram when bin count changes (continuous samples only)."""
         if self.category_dropdown.value == "Continuous" and len(self.samples) > 0:
             self._update_plot()
     def _on_bound_change(self, change):
@@ -583,11 +583,11 @@ class DistributionProbabilityVisualization:
         dist = self.dist_dropdown.value
         if dist in self.param_widgets:
             self.param_container.children = tuple(self.param_widgets[dist])
-        # Bin width only applies to continuous histograms
+        # Bin count only applies to continuous histograms
         if self.category_dropdown.value == "Continuous":
-            self.bin_width_slider.layout.display = None
+            self.n_bins_slider.layout.display = None
         else:
-            self.bin_width_slider.layout.display = 'none'
+            self.n_bins_slider.layout.display = 'none'
         # Don't update plot here to avoid double updates
         
     def _update_slider_visibility(self):
@@ -822,11 +822,9 @@ class DistributionProbabilityVisualization:
         return smin, smax
 
     def _continuous_histogram_bin_edges(self, params=None):
-        """Equal-width bin edges from the bin-width slider (fit evenly on the span)."""
+        """Equal-width bin edges from the bins slider."""
         a, b = self._continuous_histogram_span(params)
-        span = b - a
-        bin_width = max(float(self.bin_width_slider.value), 1e-6)
-        n_bins = max(1, int(round(span / bin_width)))
+        n_bins = max(1, int(self.n_bins_slider.value))
         return np.linspace(a, b, n_bins + 1)
 
     def _continuous_histogram(self, params=None):
@@ -1367,7 +1365,7 @@ class DistributionProbabilityVisualization:
             self.dist_dropdown,
             self.param_container,
             self.n_samples_slider,
-            self.bin_width_slider,
+            self.n_bins_slider,
             widgets.HBox([self.draw_button, self.reset_button]),  # Buttons side by side
             self.status_html,  # Status display for animation progress
             self.prob_controls_container  # Probability controls (available before sampling)
