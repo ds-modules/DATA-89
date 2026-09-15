@@ -350,6 +350,16 @@ class DistributionProbabilityVisualization:
             description="Samples:",
             style={'description_width': 'initial'}
         )
+
+        # Bin width for continuous sample histograms
+        self.bin_width_slider = widgets.FloatSlider(
+            value=0.05, min=0.01, max=2.0, step=0.01,
+            description="Bin width:",
+            style={'description_width': 'initial'},
+            continuous_update=False
+        )
+        # Hidden for discrete (integer outcomes use one bar per value)
+        self.bin_width_slider.layout.display = 'none'
         
         # Draw samples button
         self.draw_button = widgets.Button(
@@ -444,9 +454,14 @@ class DistributionProbabilityVisualization:
                 w.observe(self._on_param_change, names='value')
         
         self.n_samples_slider.observe(self._on_param_change, names='value')
+        self.bin_width_slider.observe(self._on_bin_width_change, names='value')
         self.bound1_slider.observe(self._on_bound_change, names='value')
         self.bound2_slider.observe(self._on_bound_change, names='value')
         
+    def _on_bin_width_change(self, change):
+        """Redraw histogram when bin width changes (continuous samples only)."""
+        if self.category_dropdown.value == "Continuous" and len(self.samples) > 0:
+            self._update_plot()
     def _on_bound_change(self, change):
         """Handle bound slider changes"""
         self.bounds_interacted = True  # User has interacted with bounds
@@ -568,6 +583,11 @@ class DistributionProbabilityVisualization:
         dist = self.dist_dropdown.value
         if dist in self.param_widgets:
             self.param_container.children = tuple(self.param_widgets[dist])
+        # Bin width only applies to continuous histograms
+        if self.category_dropdown.value == "Continuous":
+            self.bin_width_slider.layout.display = None
+        else:
+            self.bin_width_slider.layout.display = 'none'
         # Don't update plot here to avoid double updates
         
     def _update_slider_visibility(self):
@@ -777,6 +797,45 @@ class DistributionProbabilityVisualization:
             x_max = x_min + 1
 
         return x_min, x_max
+
+    def _continuous_histogram_span(self, params=None):
+        """Return (low, high) used for equal-width continuous histogram bins."""
+        if params is None:
+            params = self._get_params_dict()
+        dist_type = self.dist_dropdown.value
+
+        if dist_type == "Uniform":
+            low = params.get('low', 0)
+            high = params.get('high', 1)
+            a, b = (float(low), float(high)) if low < high else (float(high), float(low))
+            if a >= b:
+                b = a + 1e-6
+            return a, b
+
+        if dist_type == "Beta":
+            return 0.0, 1.0
+
+        smin = float(np.min(self.samples))
+        smax = float(np.max(self.samples))
+        if smin >= smax:
+            smax = smin + 1e-6
+        return smin, smax
+
+    def _continuous_histogram_bin_edges(self, params=None):
+        """Equal-width bin edges from the bin-width slider (fit evenly on the span)."""
+        a, b = self._continuous_histogram_span(params)
+        span = b - a
+        bin_width = max(float(self.bin_width_slider.value), 1e-6)
+        n_bins = max(1, int(round(span / bin_width)))
+        return np.linspace(a, b, n_bins + 1)
+
+    def _continuous_histogram(self, params=None):
+        """Density histogram with equal-width bins and correct outer edges."""
+        bin_edges = self._continuous_histogram_bin_edges(params)
+        counts, bin_edges = np.histogram(self.samples, bins=bin_edges, density=True)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        bin_width = float(bin_edges[1] - bin_edges[0])
+        return counts, bin_edges, bin_centers, bin_width
         
     def _update_bound_sliders(self, reset_to_full_range=False):
         """Update bound slider ranges to match the plot's x-axis range"""
@@ -1025,17 +1084,16 @@ class DistributionProbabilityVisualization:
                         opacity=0.7
                     ))
                 else:
-                    # For continuous, use regular histogram
-                    n_bins = 50
-                    counts, bin_edges = np.histogram(self.samples, bins=n_bins, range=(x_min, x_max), density=True)
-                    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                    # Equal-width bins on the distribution support (not the padded axis range),
+                    # so Uniform endpoints are not artificially shorter.
+                    counts, bin_edges, bin_centers, bin_width = self._continuous_histogram(params)
                     fig.add_trace(go.Bar(
                         x=bin_centers,
                         y=counts,
                         name='Histogram of Samples',
                         marker=dict(color='rgba(70,130,180,0.6)', line=dict(color='navy', width=1)),
                         showlegend=True,
-                        width=(bin_edges[1] - bin_edges[0]) * 0.9,
+                        width=bin_width * 0.9,
                         opacity=0.7
                     ))
                     
@@ -1050,7 +1108,7 @@ class DistributionProbabilityVisualization:
                                     name='Selected Samples',
                                     marker=dict(color='rgba(255,0,0,0.5)', line=dict(color='red', width=2)),
                                     showlegend=False,
-                                    width=(bin_edges[1] - bin_edges[0]) * 0.9,
+                                    width=bin_width * 0.9,
                                     opacity=0.7
                                 ))
                         elif prob_type == "above lower bound":
@@ -1062,7 +1120,7 @@ class DistributionProbabilityVisualization:
                                     name='Selected Samples',
                                     marker=dict(color='rgba(255,0,0,0.5)', line=dict(color='red', width=2)),
                                     showlegend=False,
-                                    width=(bin_edges[1] - bin_edges[0]) * 0.9,
+                                    width=bin_width * 0.9,
                                     opacity=0.7
                                 ))
                         elif prob_type == "in interval":
@@ -1074,7 +1132,7 @@ class DistributionProbabilityVisualization:
                                     name='Selected Samples',
                                     marker=dict(color='rgba(255,0,0,0.5)', line=dict(color='red', width=2)),
                                     showlegend=False,
-                                    width=(bin_edges[1] - bin_edges[0]) * 0.9,
+                                    width=bin_width * 0.9,
                                     opacity=0.7
                                 ))
             
@@ -1167,8 +1225,7 @@ class DistributionProbabilityVisualization:
                         hist_counts = hist_counts / len(self.samples)
                         max_hist = np.max(hist_counts) if len(hist_counts) > 0 else 0
                     else:
-                        n_bins = 50
-                        hist_counts, _ = np.histogram(self.samples, bins=n_bins, range=(x_min, x_max), density=True)
+                        hist_counts, _, _, _ = self._continuous_histogram(params)
                         max_hist = np.max(hist_counts) if len(hist_counts) > 0 else 0
                 max_pdf = np.max(pdf_pmf_values) if pdf_pmf_values is not None and len(pdf_pmf_values) > 0 else 0
                 max_y = max(max_hist, max_pdf, 0.1) * 1.1
@@ -1244,8 +1301,7 @@ class DistributionProbabilityVisualization:
                     hist_counts = hist_counts / len(self.samples)
                     max_hist = float(np.max(hist_counts)) if len(hist_counts) > 0 else 0
                 else:
-                    n_bins = 50
-                    hist_counts, _ = np.histogram(self.samples, bins=n_bins, range=(x_min, x_max), density=True)
+                    hist_counts, _, _, _ = self._continuous_histogram(params)
                     max_hist = float(np.max(hist_counts)) if len(hist_counts) > 0 else 0
             max_pdf = float(np.max(pdf_pmf_values)) if pdf_pmf_values is not None and len(pdf_pmf_values) > 0 else 0
             y_max = max(max_hist, max_pdf, 0.1) * 1.15
@@ -1311,6 +1367,7 @@ class DistributionProbabilityVisualization:
             self.dist_dropdown,
             self.param_container,
             self.n_samples_slider,
+            self.bin_width_slider,
             widgets.HBox([self.draw_button, self.reset_button]),  # Buttons side by side
             self.status_html,  # Status display for animation progress
             self.prob_controls_container  # Probability controls (available before sampling)
