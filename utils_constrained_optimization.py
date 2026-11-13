@@ -243,18 +243,29 @@ def has_clear_maximum(f: ScalarField, curves: list[np.ndarray]) -> bool:
     return spread > 1e-6 and best >= float(values.max()) - VALUE_TOL * spread
 
 
-# The "check if maximal" test.
+# The "check if feasible" and "check if maximal" tests.
 
 @dataclass
-class CheckResult:
-    """Outcome of testing a proposed point."""
+class FeasibilityResult:
+    """Outcome of testing a proposed point against the Lagrange conditions."""
     in_constraint: bool
     parallel: bool
-    is_maximum: bool
     distance: float       # distance from the point to X (inf when X is empty)
     sine: float           # size of the part of grad f perpendicular to grad g
     message: str
-    verdict: str          # "Correct!", "Almost!", or "Try again!"
+    verdict: str          # "Feasible!", "Almost!", or "Try again!"
+
+    @property
+    def feasible(self) -> bool:
+        return self.verdict == "Feasible!"
+
+
+@dataclass
+class MaximalityResult:
+    """Outcome of testing a feasible point for being the constrained maximum."""
+    is_maximum: bool
+    message: str
+    verdict: str          # "Correct!" or "Almost!"
 
 
 def _distance_to_curves(point: np.ndarray, curves: list[np.ndarray]) -> float:
@@ -284,56 +295,63 @@ def _typical_gradient_norm(z_grid: np.ndarray) -> float:
     return float(np.median(np.hypot(d_x1, d_x2)))
 
 
-def check_point(f, g, z_f, curves, point, require_maximum=True) -> CheckResult:
+def check_feasibility(f, g, z_f, curves, point) -> FeasibilityResult:
     """
-    Test whether `point` solves: maximize f subject to g = level.
+    Test whether `point` meets the Lagrange conditions for: maximize f subject
+    to g = level. Primal feasibility: the point lies on X. Dual feasibility:
+    grad f is parallel to grad g there.
 
-    `curves` are the polylines of X and `z_f` is f on the grid. The Lagrange
-    conditions alone also hold at constrained minima and saddles, so when
-    `require_maximum` is True a point that meets them must also match the
-    highest constrained maximum of f to count as "Correct!".
+    `curves` are the polylines of X and `z_f` is f on the grid. These conditions
+    also hold at constrained minima and saddles; `check_maximal` tells them apart.
     """
     point = np.asarray(point, dtype=float)
     distance = _distance_to_curves(point, curves)
     sine = _perpendicular_share(
         gradient(f, point), gradient(g, point), _typical_gradient_norm(z_f)
     )
-    maxima = constrained_maxima(f, curves)
     in_constraint = distance <= POSITION_TOL
     # Near a sharp peak grad f turns too fast for any clickable point to pass the
     # angle test, so a point within POSITION_TOL of a true maximum also passes.
+    maxima = constrained_maxima(f, curves)
     near_maximum = any(np.linalg.norm(p - point) <= POSITION_TOL for p in maxima)
     parallel = sine <= PARALLEL_TOL or near_maximum
 
     if not curves:
-        return CheckResult(False, parallel, False, distance, sine,
-                           "𝒳 is empty in this window. Try another level.", "Try again!")
+        return FeasibilityResult(False, parallel, distance, sine,
+                                 "𝒳 is empty in this window. Try another level.", "Try again!")
 
     if not (in_constraint and parallel):
         close = distance <= CLOSE_FACTOR * POSITION_TOL and sine <= CLOSE_FACTOR * PARALLEL_TOL
-        return CheckResult(in_constraint, parallel, False, distance, sine, "",
-                           "Almost!" if close else "Try again!")
+        return FeasibilityResult(in_constraint, parallel, distance, sine, "",
+                                 "Almost!" if close else "Try again!")
 
-    if not require_maximum:
-        return CheckResult(True, True, True, distance, sine, "", "Correct!")
+    return FeasibilityResult(True, True, distance, sine, "", "Feasible!")
 
+
+def check_maximal(f, curves, point) -> MaximalityResult:
+    """
+    Test whether a feasible `point` is the constrained maximum: its value of f
+    must match the highest constrained maximum of f on X within VALUE_TOL.
+    """
+    point = np.asarray(point, dtype=float)
     samples = np.vstack(curves)
     values = f(samples[:, 0], samples[:, 1])
     spread = float(values.max() - values.min())
     if spread < 1e-6:
-        return CheckResult(True, True, True, distance, sine,
-                           "f is constant on 𝒳, so every point of 𝒳 is a maximum.", "Correct!")
+        return MaximalityResult(True, "f is constant on 𝒳, so every point of 𝒳 is a maximum.",
+                                "Correct!")
 
+    maxima = constrained_maxima(f, curves)
     if not maxima:
-        return CheckResult(True, True, False, distance, sine,
-                           "This point is stationary, but f has no maximum on 𝒳 in this window.",
-                           "Almost!")
+        return MaximalityResult(
+            False, "This point is stationary, but f has no maximum on 𝒳 in this window.", "Almost!"
+        )
 
     best = max(float(f(p[0], p[1])) for p in maxima)
     if float(f(point[0], point[1])) >= best - VALUE_TOL * spread:
-        return CheckResult(True, True, True, distance, sine, "", "Correct!")
-    return CheckResult(True, True, False, distance, sine,
-                       "This point is stationary, but f is larger elsewhere on 𝒳.", "Almost!")
+        return MaximalityResult(True, "", "Correct!")
+    return MaximalityResult(False, "This point is stationary, but f is larger elsewhere on 𝒳.",
+                            "Almost!")
 
 
 # Drawing helpers.
@@ -400,6 +418,9 @@ class ConstrainedOptimizationDemo:
         self.require_maximum = require_maximum
         self.point = np.array([0.0, 0.0])
         self._syncing_point = False
+        self._setting_level_bounds = False
+        self._feasibility: Optional[FeasibilityResult] = None
+        self._maximality: Optional[MaximalityResult] = None
 
         self._create_widgets()
         self._create_figure()
@@ -425,9 +446,10 @@ class ConstrainedOptimizationDemo:
         self.new_random_button = widgets.Button(
             description="New random problem", icon="refresh", layout=widgets.Layout(width="330px"),
         )
+        # The bounds are reset to the range of g on the window whenever g changes.
         self.level_slider = widgets.FloatSlider(
-            value=0.0, min=-4.0, max=4.0, step=0.1, description="g level",
-            readout_format=".2f", continuous_update=False, style=style, layout=wide,
+            value=0.0, min=-4.0, max=4.0, step=0.01, description="g level",
+            readout_format=".2f", style=style, layout=wide,
         )
 
         def checkbox():
@@ -446,9 +468,14 @@ class ConstrainedOptimizationDemo:
             readout_format=".2f", style=style, layout=wide,
         )
 
-        self.check_button = widgets.Button(
-            description="Check if maximal", button_style="primary",
-            layout=widgets.Layout(width="330px"),
+        self.feasible_button = widgets.Button(
+            description="Check if Feasible", button_style="primary",
+            layout=widgets.Layout(width="163px"),
+        )
+        # Greyed out until the point passes the feasibility checks.
+        self.maximal_button = widgets.Button(
+            description="Check if Maximal", button_style="primary", disabled=True,
+            layout=widgets.Layout(width="163px"),
         )
         self.result_html = widgets.HTML(value="", layout=widgets.Layout(width="330px"))
         self.plot_output = widgets.Output()
@@ -507,6 +534,7 @@ class ConstrainedOptimizationDemo:
             self.fig = go.Figure(data=traces, layout=layout)
             self.clickable = False
             # Each redraw replaces the whole plot here, so wait for slider release.
+            self.level_slider.continuous_update = False
             self.x1_slider.continuous_update = False
             self.x2_slider.continuous_update = False
 
@@ -524,7 +552,8 @@ class ConstrainedOptimizationDemo:
             box.observe(self._exclusive_handler(partner), names="value")
         self.x1_slider.observe(self._on_point_slider, names="value")
         self.x2_slider.observe(self._on_point_slider, names="value")
-        self.check_button.on_click(self._on_check)
+        self.feasible_button.on_click(self._on_check_feasible)
+        self.maximal_button.on_click(self._on_check_maximal)
         if self.clickable:
             self.fig.data[HEATMAP].on_click(self._on_plot_click)
 
@@ -544,7 +573,23 @@ class ConstrainedOptimizationDemo:
         self.f, self.g = f, g
         self.z_f = f(X1_GRID, X2_GRID)
         self.z_g = g(X1_GRID, X2_GRID)
+        self._set_level_bounds()
         self.new_random_button.disabled = RANDOM not in (self.f_dropdown.value, self.g_dropdown.value)
+
+    def _set_level_bounds(self):
+        """Match the level slider to the range of g on the window, keeping the level if it fits."""
+        low = float(np.floor(self.z_g.min() * 100) / 100)
+        high = float(np.ceil(self.z_g.max() * 100) / 100)
+        slider = self.level_slider
+        # Clamping the value would fire the level observer; the caller redraws anyway.
+        self._setting_level_bounds = True
+        try:
+            # Widen before narrowing, so min never passes max along the way.
+            slider.min = min(slider.min, low)
+            slider.max = high
+            slider.min = low
+        finally:
+            self._setting_level_bounds = False
 
     # Drawing
 
@@ -557,14 +602,7 @@ class ConstrainedOptimizationDemo:
 
     def _update_fields(self):
         """Redraw everything that depends on f, g, the level, or the checkboxes."""
-        self._curves = constraint_curves(self.g, self.level_slider.value)
         low, high = np.percentile(self.z_f, [2, 98])
-
-        x_path, y_path = [], []
-        for curve in self._curves:
-            x_path += [*curve[:, 0], None]
-            y_path += [*curve[:, 1], None]
-
         field_f = _quiver_paths(self.f) if self.f_field_box.value else ([], [])
         field_g = _quiver_paths(self.g) if self.g_field_box.value else ([], [])
 
@@ -577,7 +615,17 @@ class ConstrainedOptimizationDemo:
                                   visible=self.g_levels_box.value)
             data[F_FIELD].update(x=field_f[0], y=field_f[1])
             data[G_FIELD].update(x=field_g[0], y=field_g[1])
-            data[CONSTRAINT].update(x=x_path, y=y_path)
+        self._update_constraint()
+
+    def _update_constraint(self):
+        """Redraw the constraint set X, the only part of the plot that depends on the level."""
+        self._curves = constraint_curves(self.g, self.level_slider.value)
+        x_path, y_path = [], []
+        for curve in self._curves:
+            x_path += [*curve[:, 0], None]
+            y_path += [*curve[:, 1], None]
+        with self.fig.batch_update():
+            self.fig.data[CONSTRAINT].update(x=x_path, y=y_path)
             self._place_constraint_label()
 
     def _place_constraint_label(self):
@@ -626,8 +674,53 @@ class ConstrainedOptimizationDemo:
         popup.update(text=text, visible=bool(text), bordercolor=color)
 
     def _clear_result(self):
+        self._feasibility = None
+        self._maximality = None
+        self.maximal_button.disabled = True
         self.result_html.value = ""
         self._set_popup()
+
+    def _shown_mark(self, levels_box, field_box) -> Optional[str]:
+        if levels_box.value:
+            return "levels"
+        if field_box.value:
+            return "field"
+        return None
+
+    def _dual_feasibility_text(self, parallel: bool) -> str:
+        """Describe dual feasibility in terms of the marks shown at the point."""
+        f_mark = self._shown_mark(self.f_levels_box, self.f_field_box)
+        g_mark = self._shown_mark(self.g_levels_box, self.g_field_box)
+        is_ = "is" if parallel else "is not"
+        are = "are" if parallel else "are not"
+        if f_mark == g_mark == "levels":
+            text = f"Level sets {are} parallel"
+        elif (f_mark, g_mark) == ("levels", "field"):
+            text = f"∇g {is_} perpendicular to the level set of f"
+        elif (f_mark, g_mark) == ("field", "levels"):
+            text = f"∇f {is_} perpendicular to the level set of g"
+        else:
+            text = f"Gradients {are} parallel"
+        return ("✅ " if parallel else "❌ ") + text
+
+    def _render_result(self):
+        """Show the latest check results, worded to match the current display choices."""
+        feasibility = self._feasibility
+        if feasibility is None:
+            return
+        primal = "✅ In 𝒳" if feasibility.in_constraint else "❌ Not in 𝒳"
+        dual = self._dual_feasibility_text(feasibility.parallel)
+        message = self._maximality.message if self._maximality else feasibility.message
+        note = f"<div style='margin-top:6px'>{message}</div>" if message else ""
+        self.result_html.value = (
+            "<div style='line-height:1.6'>"
+            f"<div><b>Primal Feasibility:</b> {primal}</div>"
+            f"<div><b>Dual Feasibility:</b> {dual}</div>{note}</div>"
+        )
+        verdict = self._maximality.verdict if self._maximality else feasibility.verdict
+        colors = {"Correct!": "#2e7d32", "Feasible!": "#2e7d32",
+                  "Almost!": "#b26a00", "Try again!": "#b3261e"}
+        self._set_popup(f"<b>{verdict}</b>", colors[verdict])
 
     # Callbacks
 
@@ -640,7 +733,12 @@ class ConstrainedOptimizationDemo:
         self._redraw_all()
 
     def _on_level_change(self, change):
-        self._redraw_all()
+        if self._setting_level_bounds:
+            return
+        # Only X moves with the level, so redraw just that while the slider is dragged.
+        self._clear_result()
+        self._update_constraint()
+        self._show()
 
     def _redraw_all(self):
         self._clear_result()
@@ -653,7 +751,12 @@ class ConstrainedOptimizationDemo:
             if change["new"] and partner.value:
                 # Unticking the partner fires this handler again, with new=False.
                 partner.value = False
-            self._redraw_all()
+            # The display choice does not change the answer, so keep any result
+            # and reword it to match what is now shown.
+            self._update_fields()
+            self._update_point()
+            self._render_result()
+            self._show()
         return handler
 
     def _on_plot_click(self, trace, points, state):
@@ -674,18 +777,18 @@ class ConstrainedOptimizationDemo:
         self._update_point()
         self._show()
 
-    def _on_check(self, button):
-        result = check_point(self.f, self.g, self.z_f, self._curves, self.point, self.require_maximum)
-        primal = "✅ In 𝒳" if result.in_constraint else "❌ Not in 𝒳"
-        dual = "✅ Parallel gradients" if result.parallel else "❌ Gradients are not parallel"
-        note = f"<div style='margin-top:6px'>{result.message}</div>" if result.message else ""
-        self.result_html.value = (
-            "<div style='line-height:1.6'>"
-            f"<div><b>Primal Feasibility:</b> {primal}</div>"
-            f"<div><b>Dual Feasibility:</b> {dual}</div>{note}</div>"
-        )
-        colors = {"Correct!": "#2e7d32", "Almost!": "#b26a00", "Try again!": "#b3261e"}
-        self._set_popup(f"<b>{result.verdict}</b>", colors[result.verdict])
+    def _on_check_feasible(self, button):
+        self._feasibility = check_feasibility(self.f, self.g, self.z_f, self._curves, self.point)
+        self._maximality = None
+        self.maximal_button.disabled = not self._feasibility.feasible
+        self._render_result()
+        self._show()
+
+    def _on_check_maximal(self, button):
+        if self._feasibility is None or not self._feasibility.feasible:
+            return
+        self._maximality = check_maximal(self.f, self._curves, self.point)
+        self._render_result()
         self._show()
 
     # Display
@@ -702,6 +805,13 @@ class ConstrainedOptimizationDemo:
         return widgets.GridBox(cells, layout=widgets.Layout(
             grid_template_columns="40px 110px 130px", width="330px", align_items="center",
         ))
+
+    def _check_buttons(self):
+        if not self.require_maximum:
+            self.feasible_button.layout.width = "330px"
+            return self.feasible_button
+        return widgets.HBox([self.feasible_button, self.maximal_button],
+                            layout=widgets.Layout(width="330px", justify_content="space-between"))
 
     def display(self):
         """Display the complete interface."""
@@ -725,7 +835,7 @@ class ConstrainedOptimizationDemo:
                 self.f_dropdown, self.g_dropdown, self.level_slider, self.new_random_button,
                 widgets.HTML("<b>Show</b>"), self._checkbox_grid(),
                 widgets.HTML("<b>Your point</b>"), self.x1_slider, self.x2_slider,
-                self.check_button, self.result_html, widgets.HTML(key),
+                self._check_buttons(), self.result_html, widgets.HTML(key),
             ],
             layout=widgets.Layout(width="340px", min_width="340px", padding="0 8px 0 0"),
         )
@@ -743,9 +853,10 @@ def show_constrained_optimization(seed: Optional[int] = None, require_maximum: b
     Display the constrained optimization demo.
 
     seed: fixes the random problems, for example so a class sees the same one.
-    require_maximum: when True, a point must be the constrained maximum to earn
-        "Correct!". When False, passing the two Lagrange checks is enough, so
-        constrained minima and saddles also earn it.
+    require_maximum: when True, a feasible point unlocks a "Check if Maximal"
+        button, which earns "Correct!" only at the constrained maximum. When
+        False, that button is hidden and passing the two Lagrange checks ends
+        at "Feasible!", so constrained minima and saddles also pass.
     """
     demo = ConstrainedOptimizationDemo(seed=seed, require_maximum=require_maximum)
     demo.display()
